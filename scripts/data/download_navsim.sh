@@ -28,6 +28,16 @@ get_cams () {  # $1=URL $2=이름
   done; echo "FAILED $2"; return 1
 }
 
+# 네트워크 볼륨은 파일마다 지연이 커서 하나씩 쓰면 초당 약 20개에 그친다. 32개씩 동시에 쓴다(약 5배 빠름).
+# $1=원본 폴더 $2=대상 폴더, 표준입력=원본 기준 상대 경로 목록. 원본에 없는 파일은 건너뛴다.
+copy_par () {
+  local list; list=$(mktemp)
+  (cd "$1" && while read -r f; do [ -f "$f" ] && echo "$f"; done) > "$list"
+  (cd "$2" && sed 's#/[^/]*$##' "$list" | sort -u | xargs -r mkdir -p)
+  (cd "$1" && xargs -r -P 32 -I{} cp "{}" "$2/{}" < "$list")
+  local rc=$?; rm -f "$list"; return $rc
+}
+
 for job in "$@"; do
   set -- $job
   case $1 in
@@ -70,8 +80,7 @@ EOF
     for i in "$@"; do
       [ -e _done/test_cam_$i ] && continue
       get_cams $HF/openscene-v1.1/openscene_sensor_test_camera/openscene_sensor_test_camera_${i}.tgz test_cam_$i \
-        && rsync -a --ignore-missing-args --files-from=navtest_keep.txt \
-             "$TMP/openscene-v1.1/sensor_blobs/test/" sensor_blobs/test/ \
+        && copy_par "$TMP/openscene-v1.1/sensor_blobs/test" "$ROOT/sensor_blobs/test" < navtest_keep.txt \
         && touch _done/test_cam_$i && echo "done test_cam_$i"
     done ;;
   navtrain)  # navtrain: current 조각만 받는다(history 불필요). 조각 번호는 1~32
@@ -79,7 +88,8 @@ EOF
     for i in "$@"; do
       [ -e _done/navtrain_cur_$i ] && continue
       get_cams $HF/navsim/navtrain_current_${i}.tgz navtrain_cur_$i \
-        && rsync -a "$TMP/navtrain_current_${i}/" sensor_blobs/trainval/ \
+        && (cd "$TMP/navtrain_current_${i}" && find . -type f | sed 's#^\./##') \
+             | copy_par "$TMP/navtrain_current_${i}" "$ROOT/sensor_blobs/trainval" \
         && ls "$TMP/navtrain_current_${i}" > _done/navtrain_cur_$i && echo "done navtrain_cur_$i"
     done ;;
   *) echo "unknown job: $1"; exit 1 ;;
