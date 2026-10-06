@@ -170,15 +170,20 @@ class L2:
         pre = self.bank.prefilter(d, ctx.v0, ctx.log_name, self.cfg.speed_tol)
         res = L2Result("undetermined", n_prefilter=len(pre))
         if len(pre) > self.cfg.k_relabel:
-            pre = rng.choice(pre, size=self.cfg.k_relabel, replace=False)
+            pre = rng.choice(pre, size=self.cfg.k_relabel, replace=False)  # 무작위 순서
+        else:
+            pre = rng.permutation(pre)
         has_turn = any(s.lat.startswith("turn") for s in d.segments)
         res.mode = "lane" if (self.cfg.lane_embed and not has_turn and ctx.ref is not None) else "ego"
-        match = []
+        match, n_tried = [], 0
         for idx in pre:
+            n_tried += 1
             poses, dh = self.place(ctx, int(idx), res.mode)
             if dh is not None and dh.usable and same_decision(d, dh):
                 match.append(int(idx))
-        res.n_relabeled, res.n_match = len(pre), len(match)
+                if len(match) >= self.cfg.k_score:  # 채점할 만큼 모이면 그만 본다 (6단계에서 추가, 시간 단축)
+                    break
+        res.n_relabeled, res.n_match = n_tried, len(match)
         if len(match) < self.cfg.n_min:
             return res
         cand = list(rng.choice(match, size=min(self.cfg.k_score, len(match)), replace=False))
