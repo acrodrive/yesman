@@ -2,7 +2,7 @@
 
 --decisions original: 사람의 원래 결정 (L1 라벨). 구조적 애매함이 있는 장면은 뺀다.
 --decisions probe: L2 확인용으로 일부러 바꾼 결정 4가지 (6단계 counterfactual의 맛보기)
-    lc_left / lc_right: 구간 1에 차선 변경(세기 0.5), 구간 2는 keep lane. 앞뒤 행동은 원래대로
+    lc_left / lc_right: 구간 1 offset(세기 0.6) → 구간 2 차선 변경(세기 0.5). 앞뒤 행동은 원래대로
     turn_left: 두 구간 모두 좌회전(세기 0.6). 앞뒤 행동은 원래대로
     go_fast: 두 구간 모두 go 0.9. 좌우 행동은 원래대로
 
@@ -36,8 +36,10 @@ def probes(d: Decision):
     s1, s2 = d.segments
     out = {}
     for side in ("left", "right"):
-        out[f"lc_{side}"] = Decision([Segment(s1.lon, s1.lon_strength, f"lane_change_{side}", 0.5),
-                                      Segment(s2.lon, s2.lon_strength, "keep_lane", 0.0)])
+        # 차선 중앙에서 시작하는 사람의 차선 변경에서 가장 흔한 모양: 구간 1 offset(세기 0.6) → 구간 2 차선 변경(0.5)
+        # (5단계 첫 버전의 "구간 1 안에 차선 변경 0.5 완료"는 차선 중앙에서 출발하면 물리적으로 맞지 않았다)
+        out[f"lc_{side}"] = Decision([Segment(s1.lon, s1.lon_strength, f"offset_{side}", 0.6),
+                                      Segment(s2.lon, s2.lon_strength, f"lane_change_{side}", 0.5)])
     out["turn_left"] = Decision([Segment(s.lon, s.lon_strength, "turn_left", 0.6) for s in (s1, s2)])
     out["go_fast"] = Decision([Segment("go", 0.9, s.lat, s.lat_strength) for s in (s1, s2)])
     # 원래 결정과 같은 시험 결정은 빼지 않는다 (예: 원래 좌회전이면 turn_left는 원래 결정과 같다). 표에 표시한다.
@@ -67,6 +69,8 @@ def run_log(args):
                 row = res.to_flat()
                 row.update(token=r["token"], log_name=log, decision_type=name, decision=str(dd),
                            seconds=time.time() - t0, scored_bank_idx=res.scored_bank_idx, scored_pass=res.scored_pass,
+                           scored_poses=(res.scored_poses.astype("float32").ravel().tolist()
+                                         if res.scored_poses is not None else []),
                            same_as_original=str(dd) == str(d))
                 out.append(row)
         except Exception as e:
@@ -81,6 +85,8 @@ def main():
     ap.add_argument("--max_scenes", type=int, default=None)
     ap.add_argument("--workers", type=int, default=16)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--ego_only", action="store_true", help="모든 후보를 ego 좌표 그대로 옮긴다 (5단계 첫 버전)")
+    ap.add_argument("--tag", default="", help="출력 파일 이름 뒤에 붙일 말")
     args = ap.parse_args()
 
     lab = pd.read_parquet(EXP / f"l1/{args.split}_labels.parquet")
@@ -90,7 +96,7 @@ def main():
     if args.max_scenes:
         lab = lab.sample(n=min(args.max_scenes, len(lab)), random_state=args.seed)
     tasks = [(args.split, log, g.to_dict("records"), args.decisions) for log, g in lab.groupby("log_name")]
-    cfg = L2Config().__dict__
+    cfg = L2Config(lane_embed=not args.ego_only).__dict__
     t0, rows = time.time(), []
     with Pool(args.workers, initializer=init_worker, initargs=(cfg,)) as pool:
         for i, r in enumerate(pool.imap_unordered(run_log, tasks), 1):
@@ -98,7 +104,7 @@ def main():
             if i % 20 == 0 or i == len(tasks):
                 print(f"{i}/{len(tasks)} logs, {len(rows)} judgments, {time.time() - t0:.0f}s", flush=True)
     df = pd.DataFrame(rows)
-    out = EXP / f"l2/{args.split}_{args.decisions}.parquet"
+    out = EXP / f"l2/{args.split}_{args.decisions}{args.tag}.parquet"
     df.to_parquet(out, index=False)
     print(f"saved {out} ({time.time() - t0:.0f}s)")
     print(df.groupby("decision_type").status.value_counts(normalize=True).unstack().round(3).to_string())

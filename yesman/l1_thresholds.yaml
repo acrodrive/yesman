@@ -8,6 +8,8 @@ a_max: 1.4           # stop 세기 = 구간 평균 감속도 / a_max. 움직이�
 turn_min_deg: 15.0   # 교차로 연결 차선에서 구간 방향 변화가 이 값 이상이면 turn [deg]
 turn_margin_deg: 3.0
 turn_max_deg: 45.0   # turn 세기 = |방향 변화| / turn_max_deg. 회전 구간 |방향 변화|의 p95 [deg]
+turn_offlane_deg: 30.0   # 교차로 밖(연결 차선을 지나지 않는) 구간 끝에서 경로 방향이 차선 방향과 이 값 이상 틀어지면 turn. 교차로 회전이 아닌 사람 구간의 p99.95, 굽은 길 p99는 16도 [deg] (5단계)
+turn_offlane_margin_deg: 5.0
 offset_min: 0.5      # 같은 차선 안에서 옆 거리가 이 값 이상 바뀌면 offset [m]
 offset_margin: 0.15
 offset_min_curve: 1.0   # 차선이 굽은 구간의 offset 기준 [m]. 곧은 구간에서 0.5 m와 같은 백분위수(p94.4)의 굽은 구간 값 0.96 m

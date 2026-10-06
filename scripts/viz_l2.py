@@ -62,12 +62,14 @@ def draw(scene, row, bank_poses, out_dir: Path, tag: str, rng: float = 40.0) -> 
     add_annotations_to_bev_ax(ax, frame.annotations)
     for tr in future_tracks(scene).values():
         ax.plot(tr[:, 1], tr[:, 0], ":", color="dimgray", lw=1, zorder=9)
-    for idx, ok in zip(row["scored_bank_idx"], row["scored_pass"]):
-        p = bank_poses[idx]
+    # 실제로 채점한 경로 (옮긴 뒤). 예전 결과 표에 없으면 경로 모음의 원래 경로를 그린다
+    scored = (np.asarray(row["scored_poses"]).reshape(-1, 8, 3) if len(row.get("scored_poses", [])) else
+              bank_poses[np.asarray(row["scored_bank_idx"], dtype=int)])
+    for p, ok in zip(scored, row["scored_pass"]):
         ax.plot(np.r_[0, p[:, 1]], np.r_[0, p[:, 0]], "-", color="green" if ok else "red", lw=0.7, alpha=0.6,
                 zorder=10)
     if row["best_bank_idx"] >= 0:
-        p = bank_poses[int(row["best_bank_idx"])]
+        p = scored[list(row["scored_bank_idx"]).index(int(row["best_bank_idx"]))]
         ax.plot(np.r_[0, p[:, 1]], np.r_[0, p[:, 0]], "o-", color="blue" if row["status"] == "feasible" else "orange",
                 lw=2.5, ms=4, zorder=12, label="best candidate")
     h = scene.get_future_trajectory(8).poses
@@ -80,7 +82,7 @@ def draw(scene, row, bank_poses, out_dir: Path, tag: str, rng: float = 40.0) -> 
     ax.legend(loc="lower right", fontsize=8)
     fails = ", ".join(f"{k[5:]} {row[k]:.0%}" for k in ("fail_collision", "fail_off_road", "fail_wrong_way")
                       if k in row and pd.notna(row[k]))
-    fig.suptitle(f"{tag}{row['token']} [{row['decision_type']}]  decision: {row['decision']}\n"
+    fig.suptitle(f"{tag}{row['token']} [{row['decision_type']}, {row.get('mode', 'ego')}]  decision: {row['decision']}\n"
                  f"L2: {row['status'].upper()}  reason: {row['reason'] or '-'}  |  candidates: prefilter "
                  f"{row['n_prefilter']}, match {row['n_match']}/{row['n_relabeled']}, pass {row['n_pass']}/"
                  f"{row['n_scored']}  |  fail rate: {fails}", fontsize=10, family="monospace")

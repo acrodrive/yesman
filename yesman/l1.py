@@ -19,7 +19,11 @@
   차선 경계선까지의 거리로 구한다.
 
 좌우 행동 판정 (구간마다, 위에서부터 먼저 해당하는 것)
-1. turn: 구간이 교차로 연결 차선(lane connector)을 지나고, 경로 방향이 turn_min_deg 이상 바뀌었다. 세기 = |방향 변화| / turn_max_deg.
+1. turn: (a) 구간이 교차로 연결 차선(lane connector)을 지나고, 경로 방향이 turn_min_deg 이상 바뀌었다.
+   세기 = |방향 변화| / turn_max_deg. 또는 (b) 구간 끝에서 경로 방향이 기준 차선 방향과 turn_offlane_deg 이상
+   틀어졌다(교차로 밖, 즉 연결 차선을 지나지 않는 구간에서 차선을 벗어나 꺾음. 5단계에서 추가).
+   세기 = |차선 대비 방향| / turn_max_deg. 교차로 안에서는 기준 차선열 선택이 흔들려 (b)를 쓰지 않는다.
+   굽은 길을 따라가면 차선도 같이 굽으므로 (b)에 해당하지 않는다.
 2. lane change: 구간 시작과 끝의 차선 번호가 다르다. 차선 번호는 기준 차선을 0으로, 왼쪽으로 한 차선 폭마다 +1이다.
    옆 차선이 실제로 있는지는 보지 않는다(기하만으로 판정). 그래야 도로가 없는 쪽으로 차선 변경을 따라간 경로도 lane change로 잡힌다.
    세기 = 구간 안에서 0.5초마다 잰 옆 이동 속도의 최대값 / vlat_max.
@@ -385,12 +389,23 @@ def classify(f: Dict[str, float], th: Optional[Dict[str, float]] = None) -> Deci
             nt_lat, nt_strength = "keep_lane", 0.0
             nt_alt = offset_dir if near_offset else ""
 
-        turn_dir = "turn_left" if dh > 0 else "turn_right"
-        near_turn = on_conn and abs(abs(dh) - th["turn_min_deg"]) < th["turn_margin_deg"]
+        # turn (1) 교차로: 연결 차선을 지나며 경로 방향이 turn_min_deg 이상 바뀜
+        #      (2) 교차로 밖: 연결 차선을 지나지 않는 구간 끝에서 경로 방향이 차선 방향과 turn_offlane_deg 이상 틀어짐
+        #          굽은 길을 따라가면 차선도 같이 굽으므로 (2)에 해당하지 않는다 (사람 경로 p99 16도)
+        hrel = np.degrees(g("hrel_end"))
+        conn_turn = on_conn and abs(dh) >= th["turn_min_deg"]
+        off_turn = (not on_conn) and abs(hrel) >= th["turn_offlane_deg"]  # 교차로(연결 차선) 위에서는 (1)만 쓴다
+        near_conn = on_conn and abs(abs(dh) - th["turn_min_deg"]) < th["turn_margin_deg"]
+        near_off = (not on_conn) and abs(abs(hrel) - th["turn_offlane_deg"]) < th["turn_offlane_margin_deg"]
+        if conn_turn:
+            turn_dir, turn_strength = ("turn_left" if dh > 0 else "turn_right"), abs(dh) / th["turn_max_deg"]
+        else:
+            turn_dir, turn_strength = ("turn_left" if hrel > 0 else "turn_right"), abs(hrel) / th["turn_max_deg"]
+        near_turn = (near_conn and not off_turn) or (near_off and not conn_turn)
         if near_turn:
-            reasons.append(f"seg{k}:turn_margin")  # 방향 변화가 turn 기준 근처 (turn/keep 경계)
-        if on_conn and abs(dh) >= th["turn_min_deg"]:
-            lat, lat_strength = turn_dir, abs(dh) / th["turn_max_deg"]
+            reasons.append(f"seg{k}:turn_margin")  # turn 기준 근처 (turn/keep 경계)
+        if conn_turn or off_turn:
+            lat, lat_strength = turn_dir, turn_strength
             alt_lat = nt_lat if near_turn else ""
         else:
             lat, lat_strength = nt_lat, nt_strength
@@ -437,3 +452,77 @@ def features_from_scene(scene, poses: Optional[np.ndarray] = None, debug: Option
         poses = scene.get_future_trajectory(8).poses
     v0 = float(np.linalg.norm(status.ego_velocity[:2]))
     return extract_features(poses, v0, status.ego_pose, scene.map_api, debug)
+
+
+# ----------------------------------------------------------------------------------------------------------------
+# 차선 기준으로 경로 다시 그리기 (5단계 L2: 다른 장면의 경로를 이 장면의 차선 위에 옮긴다)
+# ----------------------------------------------------------------------------------------------------------------
+
+@dataclass
+class LaneReference:
+    """장면 하나의 기준 차선열: 출발 차선에서 가장 곧게 이어지는 차선열과 ego의 투영 위치."""
+    pl: _Polyline
+    s0: float  # ego 뒤차축의 진행 거리
+    d0: float  # ego 뒤차축의 옆 거리 (왼쪽 +)
+    ego_pose: np.ndarray
+
+
+REF_LENGTH = 120.0  # 기준 차선열 길이 (4초 동안 30 m/s도 들어간다) [m]
+REF_HEADING_WINDOW = 40.0  # 곧은 정도를 잴 구간 길이 [m]
+
+
+def lane_reference(ego_pose: Sequence[float], map_api: AbstractMap) -> Optional[LaneReference]:
+    """출발 차선에서 이어지는 차선열 중, 앞 40 m 동안 방향이 가장 적게 바뀌는 것(직진에 가장 가까운 것)을 고른다.
+    비용 = |출발 옆 거리| + CHAIN_HEADING_COST x |앞 40 m 방향 변화(도)|. 출발 차선이 없으면 None."""
+    x, y, h = ego_pose
+    cands = _start_candidates(map_api, x, y, h)
+    if not cands:
+        return None
+    starts = {e.id: e for e, _ in cands}
+    for e, _ in cands:
+        if _Polyline.from_chain([e]).project(np.array([x, y]))[4]:
+            for o in e.obj.incoming_edges:
+                starts.setdefault(o.id, _edge(map_api, o))
+    best = None
+    for e in starts.values():
+        s0, _, _, _, _ = _Polyline.from_chain([e]).project(np.array([x, y]))
+        for chain in _chains(map_api, e, need=s0 + REF_LENGTH):
+            pl = _Polyline.from_chain(chain)
+            s, d, _, th0, beyond = pl.project(np.array([x, y]), -np.inf, s0 + 1.0)
+            if beyond or pl.s[-1] - s < 30.0:
+                continue
+            s1 = min(s + REF_HEADING_WINDOW, pl.s[-1])
+            i1 = min(int(np.searchsorted(pl.s, s1)), len(pl.xy) - 2)
+            th1 = np.arctan2(*(pl.xy[i1 + 1] - pl.xy[i1])[::-1])
+            cost = abs(d) + CHAIN_HEADING_COST * abs(np.degrees(_wrap(th1 - th0)))
+            if best is None or cost < best[0]:
+                best = (cost, LaneReference(pl, s, d, np.asarray(ego_pose, dtype=np.float64)))
+    return best[1] if best else None
+
+
+def embed_on_lane(ref: LaneReference, s_rel: np.ndarray, d_rel: np.ndarray, hrel: np.ndarray) -> Optional[np.ndarray]:
+    """다른 장면의 경로를 그 장면 차선 기준의 (진행 거리, 옆 거리, 차선 대비 방향) 시간표로 받아 이 장면의 기준 차선 위에
+    다시 그린다. 출발 옆 거리는 이 장면의 ego 위치(d0)에 맞추고, 그 뒤의 변화량은 원래 경로 그대로 쓴다.
+
+    :param s_rel, d_rel, hrel: 점 9개(t = 0..4초)의 진행 거리, 옆 거리, 차선 대비 방향 (원래 장면 기준)
+    :return: (8, 3) ego 좌표계 경로. 기준 차선열이 모자라면 None
+    """
+    s = ref.s0 + (np.asarray(s_rel, dtype=np.float64) - s_rel[0])
+    d = ref.d0 + (np.asarray(d_rel, dtype=np.float64) - d_rel[0])
+    if s.max() > ref.pl.s[-1] - 1.0 or s.min() < 0:
+        return None
+    px, py = np.interp(s, ref.pl.s, ref.pl.xy[:, 0]), np.interp(s, ref.pl.s, ref.pl.xy[:, 1])
+    ds = 0.5
+    tx = np.interp(s + ds, ref.pl.s, ref.pl.xy[:, 0]) - np.interp(s - ds, ref.pl.s, ref.pl.xy[:, 0])
+    ty = np.interp(s + ds, ref.pl.s, ref.pl.xy[:, 1]) - np.interp(s - ds, ref.pl.s, ref.pl.xy[:, 1])
+    tang = np.arctan2(ty, tx)
+    gx, gy = px - np.sin(tang) * d, py + np.cos(tang) * d
+    gh = tang + np.asarray(hrel, dtype=np.float64)
+    x0, y0, h0 = ref.ego_pose
+    c, sn = np.cos(h0), np.sin(h0)
+    dx, dy = gx - x0, gy - y0
+    loc = np.stack([c * dx + sn * dy, -sn * dx + c * dy, _wrap(gh - h0)], axis=1)
+    # 출발점은 ego 원점이어야 한다 (d0, 방향 차이를 맞췄으므로 거의 0). 남은 작은 차이는 빼서 원점에 맞춘다
+    loc[:, :2] -= loc[0, :2]
+    loc[:, 2] = _wrap(loc[:, 2] - loc[0, 2])
+    return loc[1:]

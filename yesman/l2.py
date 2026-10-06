@@ -5,25 +5,30 @@
 판정 (장면, 결정 d):
 1. 후보 고르기: 출발 속도가 ±2 m/s 안이고, 판정할 장면과 다른 로그이며, 원래 장면에서의 L1 라벨이 d와 맞는(d̂ ≈ d)
    경로 중에서 무작위로 최대 k_relabel개를 고른다.
-2. 다시 라벨 붙이기: 고른 경로를 판정할 장면에 그대로 옮겨 놓고(ego 좌표계) L1을 다시 돌린다. 이 장면에서도 d̂ ≈ d이고
-   구조적 애매함이 없는 경로만 후보로 남긴다. 후보가 n_min개 미만이면 "판정 불가"이다.
-3. 채점: 후보 중 무작위로 최대 k_score개를 NAVSIM v2 채점 도구로 한 번에 채점한다(human filter 적용).
+2. 옮기기 (5단계 결정 B):
+   - d에 turn이 없으면(keep / offset / lane change): 차선 기준으로 옮긴다. 원래 차선 기준의 (진행 거리, 옆 거리,
+     차선 대비 방향) 시간표를 판정할 장면의 기준 차선(출발 차선에서 가장 곧게 이어지는 차선열) 위에 다시 그린다.
+     속도와 옆 이동 모양은 사람 경로 그대로이고, 도로 모양만 이 장면에 맞춰진다.
+   - d에 turn이 있으면: ego 좌표 그대로 옮긴다 (교차로 회전은 그 교차로의 모양이 중요하므로).
+3. 다시 라벨 붙이기: 옮긴 경로에 L1을 다시 돌려, 이 장면에서도 d̂ ≈ d이고 구조적 애매함이 없는 경로만 후보로 남긴다.
+   후보가 n_min개 미만이면 "판정 불가"이다.
+4. 채점: 후보 중 무작위로 최대 k_score개를 NAVSIM v2 채점 도구로 한 번에 채점한다(human filter 적용).
    NC = DAC = DDC = 1인 후보가 하나라도 있으면 "가능", 없으면 "불가능"이다.
-4. 출력: 가능이면 통과한 후보 중 점수(EC를 뺀 EPDMS)가 가장 높은 경로. 불가능이면 판단 근거 = 떨어진 후보 중
+5. 출력: 가능이면 통과한 후보 중 점수(EC를 뺀 EPDMS)가 가장 높은 경로. 불가능이면 판단 근거 = 떨어진 후보 중
    점수가 가장 높았던 후보가 떨어진 항목. 점수는 곱하는 항목을 뺀 가중 평균 점수에서 떨어진 항목 수가 적은 순으로 고른다.
 """
 
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
 from navsim.planning.metric_caching.metric_cache import MetricCache
 from yesman.decision import Decision, Segment, same_decision
-from yesman.l1 import classify, extract_features, load_thresholds
+from yesman.l1 import LaneReference, classify, embed_on_lane, extract_features, lane_reference, load_thresholds
 from yesman.scoring import BatchScorer, feasibility
 
 EXP = Path(os.environ["NAVSIM_EXP_ROOT"])
@@ -40,6 +45,7 @@ class L2Config:
     k_relabel: int = 200  # 다시 라벨을 붙일 최대 경로 수
     k_score: int = 50  # 채점할 최대 후보 수
     seed: int = 0
+    lane_embed: bool = True  # turn이 없는 결정은 차선 기준으로 옮긴다 (False: 모두 ego 좌표 그대로, 5단계 첫 버전)
 
 
 @dataclass
@@ -57,10 +63,12 @@ class L2Result:
     best_poses: Optional[np.ndarray] = None
     scored_bank_idx: List[int] = field(default_factory=list)
     scored_pass: List[bool] = field(default_factory=list)
+    scored_poses: Optional[np.ndarray] = None  # (n_scored, 8, 3) 실제로 채점한 경로 (옮긴 뒤)
+    mode: str = ""  # lane (차선 기준으로 옮김) / ego (ego 좌표 그대로)
 
     def to_flat(self) -> Dict[str, object]:
         row = {k: v for k, v in self.__dict__.items() if k not in ("fail_frac", "best_poses", "scored_bank_idx",
-                                                                   "scored_pass")}
+                                                                   "scored_pass", "scored_poses")}
         for m, v in self.fail_frac.items():
             row[f"fail_{REASON_NAME.get(m, m)}"] = v
         return row
@@ -76,6 +84,10 @@ class PathBank:
         self.v0 = df.v0.to_numpy()
         self.log = df.log_name.to_numpy()
         self.decisions = [row_to_decision(r) for r in df.to_dict("records")]
+        # 원래 차선 기준의 점 9개 값 (차선 기준으로 옮길 때 씀)
+        self.pt_s = np.stack(df.pt_s.to_numpy()).astype(np.float64)
+        self.pt_d = np.stack(df.pt_d.to_numpy()).astype(np.float64)
+        self.pt_hrel = np.stack(df.pt_hrel.to_numpy()).astype(np.float64)
         # 빠른 1차 거르기용: 구간별 (lon, lat, alt_lon, alt_lat)
         self._lab = {c: df[c].to_numpy() for c in df.columns if c.startswith("seg")}
 
@@ -121,7 +133,8 @@ class SceneContext:
     map_api: object
     metric_cache: MetricCache
     human: Dict[str, float]  # human filter용 사람 경로 채점 결과
-    relabel_cache: Dict[int, Decision] = field(default_factory=dict)  # 경로 모음 행 번호 → 이 장면에서의 L1
+    ref: Optional[LaneReference] = None  # 기준 차선 (차선 기준으로 옮길 때)
+    relabel_cache: Dict = field(default_factory=dict)  # (경로 모음 행 번호, 옮기는 방식) → (옮긴 경로, 이 장면에서의 L1)
 
 
 class L2:
@@ -133,15 +146,22 @@ class L2:
     def context(self, scene, metric_cache: MetricCache) -> SceneContext:
         cur = scene.scene_metadata.num_history_frames - 1
         st = scene.frames[cur].ego_status
+        ref = lane_reference(st.ego_pose, scene.map_api) if self.cfg.lane_embed else None
         return SceneContext(scene.scene_metadata.initial_token, scene.scene_metadata.log_name,
                             float(np.linalg.norm(st.ego_velocity[:2])), np.asarray(st.ego_pose), scene.map_api,
-                            metric_cache, self.scorer.human_metrics(metric_cache))
+                            metric_cache, self.scorer.human_metrics(metric_cache), ref)
 
-    def relabel(self, ctx: SceneContext, idx: int) -> Decision:
-        if idx not in ctx.relabel_cache:
-            f = extract_features(self.bank.poses[idx], ctx.v0, ctx.ego_pose, ctx.map_api)
-            ctx.relabel_cache[idx] = classify(f, self.th)
-        return ctx.relabel_cache[idx]
+    def place(self, ctx: SceneContext, idx: int, mode: str) -> Tuple[Optional[np.ndarray], Optional[Decision]]:
+        """경로 모음의 경로 idx를 이 장면에 옮기고 L1을 다시 돌린다. (옮긴 경로, L1) 또는 (None, None)."""
+        key = (idx, mode)
+        if key not in ctx.relabel_cache:
+            b = self.bank
+            poses = (embed_on_lane(ctx.ref, b.pt_s[idx], b.pt_d[idx], b.pt_hrel[idx]) if mode == "lane"
+                     else b.poses[idx])
+            dh = classify(extract_features(poses, ctx.v0, ctx.ego_pose, ctx.map_api), self.th) if poses is not None \
+                else None
+            ctx.relabel_cache[key] = (poses, dh)
+        return ctx.relabel_cache[key]
 
     def judge(self, ctx: SceneContext, d: Decision, rng: Optional[np.random.Generator] = None) -> L2Result:
         if not d.usable:
@@ -151,16 +171,20 @@ class L2:
         res = L2Result("undetermined", n_prefilter=len(pre))
         if len(pre) > self.cfg.k_relabel:
             pre = rng.choice(pre, size=self.cfg.k_relabel, replace=False)
+        has_turn = any(s.lat.startswith("turn") for s in d.segments)
+        res.mode = "lane" if (self.cfg.lane_embed and not has_turn and ctx.ref is not None) else "ego"
         match = []
         for idx in pre:
-            dh = self.relabel(ctx, int(idx))
-            if dh.usable and same_decision(d, dh):
+            poses, dh = self.place(ctx, int(idx), res.mode)
+            if dh is not None and dh.usable and same_decision(d, dh):
                 match.append(int(idx))
         res.n_relabeled, res.n_match = len(pre), len(match)
         if len(match) < self.cfg.n_min:
             return res
         cand = list(rng.choice(match, size=min(self.cfg.k_score, len(match)), replace=False))
-        df = self.scorer.score(ctx.metric_cache, [self.bank.poses[i] for i in cand], ctx.human)
+        cand_poses = np.stack([self.place(ctx, int(i), res.mode)[0] for i in cand])
+        res.scored_poses = cand_poses
+        df = self.scorer.score(ctx.metric_cache, list(cand_poses), ctx.human)
         ok = feasibility(df, FEAS_ITEMS)
         res.n_scored, res.n_pass = len(cand), int(ok.sum())
         res.scored_bank_idx, res.scored_pass = [int(i) for i in cand], [bool(x) for x in ok]
@@ -179,5 +203,5 @@ class L2:
             res.status = "infeasible"
             res.reason = "+".join(REASON_NAME[m] for m in FEAS_ITEMS if df[m].iloc[best] < 1)
         res.best_bank_idx, res.best_score = cand[best], float(score[best])
-        res.best_poses = self.bank.poses[cand[best]]
+        res.best_poses = cand_poses[best]
         return res
