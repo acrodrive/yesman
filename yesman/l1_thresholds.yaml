@@ -1,0 +1,18 @@
+# L1 기준값 (4단계에서 navtrain 103,158장면, 206,316구간의 사람 경로 분포로 정함. 근거: docs/step04_l1.md)
+# 앞뒤 행동
+v_stop: 0.5          # 구간 끝 속도가 이 값 미만이면 stop [m/s]
+v_stop_margin: 0.2   # v_stop ± 이 값 안이면 앞뒤 행동을 애매함으로 표시 [m/s]
+v_max: 10.5          # go 세기 = 끝 속도 / v_max. go 구간 끝 속도의 p95 [m/s]
+a_max: 1.4           # stop 세기 = 구간 평균 감속도 / a_max. 움직이다 멈춘 구간 감속도의 p95 [m/s^2]
+# 좌우 행동
+turn_min_deg: 15.0   # 교차로 연결 차선에서 구간 방향 변화가 이 값 이상이면 turn [deg]
+turn_margin_deg: 3.0
+turn_max_deg: 45.0   # turn 세기 = |방향 변화| / turn_max_deg. 회전 구간 |방향 변화|의 p95 [deg]
+offset_min: 0.5      # 같은 차선 안에서 옆 거리가 이 값 이상 바뀌면 offset [m]
+offset_margin: 0.15
+offset_min_curve: 1.0   # 차선이 굽은 구간의 offset 기준 [m]. 곧은 구간에서 0.5 m와 같은 백분위수(p94.4)의 굽은 구간 값 0.96 m
+curve_deg: 5.0          # 구간 동안 차선 중심선의 방향 변화가 이 값 이상이면 굽은 구간 [deg]
+offset_max: 1.7      # offset 세기 = |옆 거리 변화| / offset_max. offset 구간의 p95 [m]
+vlat_max: 2.0        # lane change 세기 = 최대 옆 이동 속도 / vlat_max. 차선 변경 구간의 p95 [m/s]
+lat_boundary_margin: 0.3   # 구간 시작이나 끝이 차선 경계에서 이 거리 안이면 좌우 행동을 애매함으로 표시 [m]
+heading_rel_max_deg: 30.0  # 회전이 아닌 구간에서 경로 방향이 차선 방향과 이 값 이상 어긋나면 애매함 (차선 밖 주행) [deg]

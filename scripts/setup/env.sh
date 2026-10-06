@@ -12,6 +12,9 @@ export NUPLAN_MAPS_ROOT=$OPENSCENE_DATA_ROOT/maps
 export NAVSIM_DEVKIT_ROOT=$YESMAN_ROOT/third_party/navsim
 export NAVSIM_EXP_ROOT=$YESMAN_ROOT/exp
 
+# 이 저장소의 패키지(yesman/)를 import할 수 있게 한다
+export PYTHONPATH=$YESMAN_ROOT${PYTHONPATH:+:$PYTHONPATH}
+
 # pip / torch / HF 캐시도 볼륨에 둔다 (컨테이너 디스크는 pod 종료 시 지워진다)
 export PIP_CACHE_DIR=$WORKSPACE/.cache/pip
 export TORCH_HOME=$WORKSPACE/.cache/torch
