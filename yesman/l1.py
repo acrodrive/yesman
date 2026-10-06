@@ -360,6 +360,8 @@ def classify(f: Dict[str, float], th: Optional[Dict[str, float]] = None) -> Deci
             lon = "go"
             lon_strength = v_end / th["v_max"]
         amb_lon = abs(v_end - th["v_stop"]) < th["v_stop_margin"]
+        if amb_lon:
+            reasons.append(f"seg{k}:stop_speed_margin")  # 끝 속도가 v_stop 근처 (go/stop 경계)
 
         # 좌우 행동
         dh = np.degrees(g("dh"))
@@ -374,18 +376,26 @@ def classify(f: Dict[str, float], th: Optional[Dict[str, float]] = None) -> Deci
         if on_conn and abs(dh) >= th["turn_min_deg"]:
             lat = "turn_left" if dh > 0 else "turn_right"
             lat_strength = abs(dh) / th["turn_max_deg"]
-            amb_lat |= abs(abs(dh) - th["turn_min_deg"]) < th["turn_margin_deg"]
+            if abs(abs(dh) - th["turn_min_deg"]) < th["turn_margin_deg"]:
+                amb_lat = True
+                reasons.append(f"seg{k}:turn_margin")  # 방향 변화가 turn 기준 근처 (turn/keep 경계)
         elif i1 != i0:
             lat = "lane_change_left" if i1 > i0 else "lane_change_right"
             lat_strength = g("vlat_peak") / th["vlat_max"]
         elif abs(dd) >= off_min:
             lat = "offset_left" if dd > 0 else "offset_right"
             lat_strength = abs(dd) / th["offset_max"]
-            amb_lat |= abs(abs(dd) - off_min) < th["offset_margin"]
+            if abs(abs(dd) - off_min) < th["offset_margin"]:
+                amb_lat = True
+                reasons.append(f"seg{k}:offset_margin")  # 옆 거리 변화가 offset 기준 근처 (offset/keep 경계)
         else:
             lat, lat_strength = "keep_lane", 0.0
-            amb_lat |= abs(abs(dd) - off_min) < th["offset_margin"]
-            amb_lat |= on_conn and abs(abs(dh) - th["turn_min_deg"]) < th["turn_margin_deg"]
+            if abs(abs(dd) - off_min) < th["offset_margin"]:
+                amb_lat = True
+                reasons.append(f"seg{k}:offset_margin")
+            if on_conn and abs(abs(dh) - th["turn_min_deg"]) < th["turn_margin_deg"]:
+                amb_lat = True
+                reasons.append(f"seg{k}:turn_margin")
         if not lat.startswith("turn"):
             # 차선 경계 근처에서 끝나거나 시작하면 lane change와 offset/keep이 흔들린다
             if min(boundary_margin(g("d_start"), g("wl_start"), g("wr_start")),

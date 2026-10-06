@@ -42,7 +42,7 @@ yesman.md 11절 4단계의 결과와 계획서와 달라진 점을 정리한 것
 - 좌우 행동은 위 표의 순서(turn → lane change → offset → keep lane)대로 먼저 해당하는 것으로 정한다. 세기는 0~1로 자른다.
 - 구간 끝 속도는 마지막 두 0.5초 평균 속도에서 선형 외삽한 값이다(1.5 v_last − 0.5 v_prev, 0 이상). 0.5초 평균을 그대로 쓰면, 구간 끝에 막 멈춘 경로도 끝 속도가 0보다 크게 나온다(단위 테스트로 발견). 구간 1의 시작 속도는 ego status의 현재 속도이고, 구간 2의 시작 속도는 구간 1의 끝 속도이다.
 - 차선 변경은 옆 차선이 실제로 있는지 보지 않고 기하만으로 판정한다. 그래야 "왼쪽에 도로가 없는데 차선 변경"을 그대로 따라간 모델 경로도 lane change로 잡혀서, 맹목적 추종을 측정할 수 있다.
-- 애매함 표시(구간 단위): 값이 기준값 경계의 margin 안에 있으면 표시한다. 대상은 끝 속도 0.5±0.2 m/s, 회전 15±3°, offset 기준±0.15 m, 그리고 구간 시작이나 끝이 차선 경계에서 0.3 m 안인 경우이다. 또 경로 방향이 차선 방향과 30° 이상 어긋나거나(차선 밖 주행), 차선열 끝을 넘은 경우에도 표시한다. 출발 차선을 찾지 못하면 결정 전체가 invalid이다.
+- 애매함 표시(구간 단위): 값이 기준값 경계의 margin 안에 있으면 표시하고, `Decision.reason`에 이유(`seg1:offset_margin` 등)를 남긴다. 대상은 끝 속도 0.5±0.2 m/s, 회전 15±3°, offset 기준±0.15 m, 그리고 구간 시작이나 끝이 차선 경계에서 0.3 m 안인 경우이다. 또 경로 방향이 차선 방향과 30° 이상 어긋나거나(차선 밖 주행), 차선열 끝을 넘은 경우에도 표시한다. 출발 차선을 찾지 못하면 결정 전체가 invalid이다.
 
 ## 기준값 (`yesman/l1_thresholds.yaml`)
 
@@ -86,6 +86,26 @@ navtrain (`logs/step04/l1_label_navtrain.md`): 103,288장면 중 valid 103,158�
 - 좌회전이 우회전보다 2배 많다. 미국에서는 우회전이 짧고 급해서 한 구간 안에 끝나는 경우가 많고, 좌회전은 큰 호를 그리며 두 구간에 걸친다. 싱가포르(좌측 통행)도 섞여 있다.
 - 애매함은 offset과 차선 변경에 많다(그 행동 구간의 40~50%). offset은 0.5 m 근처에 분포가 몰려 있기 때문이다. 차선 변경은 구간 경계(2초)에서 차선 경계선 위에 있는 경우가 많기 때문이다. 이유별로 보면 차선 경계 근처 4,098구간, 차선 밖 방향 238구간, 차선열 끝 3구간이다(이 셋 외에는 기준값 margin에 걸린 경우이다).
 - 출발 차선을 찾지 못한 장면(invalid)은 navtrain 130장면, navtest 10장면이다(주차장 등).
+
+## 애매함은 어디서 나오는가 (`scripts/l1_ambiguity_viz.py`)
+
+애매함이 표시된 장면은 navtrain valid의 26.4%(27,242장면)이다. 이유별로 나누면 다음과 같다. 한 장면에 이유가 여럿일 수 있다.
+
+| 이유 | 규칙 | 구간 수 | 장면 비율 |
+| --- | --- | --- | --- |
+| offset_margin | 같은 차선 안 옆 거리 변화가 offset 기준 ±0.15 m 안 | 11,478 | 10.6% |
+| turn_margin | 연결 차선 위 방향 변화가 15° ± 3° 안 | 11,363 | 9.8% |
+| stop_speed_margin | 구간 끝 속도가 0.5 ± 0.2 m/s 안 | 5,257 | 4.9% |
+| near_boundary | 구간 시작이나 끝에 차선 경계선 0.3 m 안 | 4,098 | 3.3% |
+| off_lane_heading, beyond_chain | 차선 방향과 30° 이상 어긋남, 차선열 끝을 넘음 | 241 | 0.2% |
+
+![ambiguity distributions](figs/step04/ambiguity_distributions.png)
+
+- **기준값 근처(offset, turn, stop. 장면의 약 23%)**: 라벨이 틀렸다는 뜻이 아니다. 값이 기준선 가까이 있어 조금만 달라져도 라벨이 바뀐다는 경고이다. offset과 turn의 기준값은 분포의 골짜기가 아니라 완만한 꼬리 위에 있다. 그래서 고정 폭의 띠에 구간의 7~11%가 들어간다. 그 결과 규칙 4개 × 구간 2개가 쌓여 장면의 26%가 된다. 이 비율은 margin 폭에 거의 비례하므로, margin을 정하는 방식에 따라 크게 달라진다.
+  - turn_margin 예시: 4개 중 3개는 회전의 시작이나 끝이 2초 구간에 걸려 17~21°가 된 분명한 좌회전이다. 로터리의 완만한 연결 차선(14°, 13°) 1개만 정말 애매하다. ![turn](figs/step04/ambiguity_turn_margin.png)
+  - offset_margin 예시: 차선 안에서 0.4~0.6 m 정도 자연스럽게 흔들린 경우이다. ![offset](figs/step04/ambiguity_offset_margin.png)
+  - stop_speed_margin 예시: 끝 속도 0.3~0.7 m/s로 거의 멈춘 서행이다. ![stop](figs/step04/ambiguity_stop_speed_margin.png)
+- **구조적으로 애매함(near_boundary 등. 약 3.5%)**: 출발할 때 두 차선 사이에 걸쳐 있거나, 차선 변경 도중 구간 경계에서 경계선 위에 있다. 어느 차선을 기준으로 볼지가 정말 불분명하다. ![boundary](figs/step04/ambiguity_near_boundary.png)
 
 ## 굽은 도로 (`scripts/l1_curved_check.py`, `logs/step04/curved_road_check.md`)
 
@@ -135,6 +155,7 @@ navtrain (`logs/step04/l1_label_navtrain.md`): 103,288장면 중 valid 103,158�
 | `scripts/l1_label.py` | 기준값 적용, 결정 분포 표 |
 | `scripts/l1_curved_check.py` | 굽은 도로 keep lane 확인 |
 | `scripts/viz_l1.py` | L1 결과 BEV 그림 (기준 차선열, 옆 거리, 구간별 결정) |
+| `scripts/l1_ambiguity_viz.py` | 애매함 규칙별 분포 그림과 이유별 예시 장면 |
 | `scripts/setup/env.sh` | `PYTHONPATH`에 저장소 루트를 추가 (`import yesman`) |
 
 그림 예시 (위 제목: L1 결정과 구간별 값. 파란 선 = 기준 차선열, 주황 = 연결 차선, 점 옆 숫자 = 옆 거리 d)
