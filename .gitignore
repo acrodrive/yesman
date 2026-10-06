@@ -1,0 +1,15 @@
+# 외부 코드 (버전은 scripts/setup/install_navsim.sh 에 커밋으로 고정)
+third_party/
+
+# 가중치, 실험 결과, 로그 (용량이 크다)
+checkpoints/
+exp/
+logs/
+*.ckpt
+*.pt
+*.pth
+
+# python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
