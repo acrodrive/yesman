@@ -359,11 +359,12 @@ def classify(f: Dict[str, float], th: Optional[Dict[str, float]] = None) -> Deci
         else:
             lon = "go"
             lon_strength = v_end / th["v_max"]
-        amb_lon = abs(v_end - th["v_stop"]) < th["v_stop_margin"]
-        if amb_lon:
-            reasons.append(f"seg{k}:stop_speed_margin")  # 끝 속도가 v_stop 근처 (go/stop 경계)
+        alt_lon = ""
+        if abs(v_end - th["v_stop"]) < th["v_stop_margin"]:  # 끝 속도가 v_stop 근처 (go/stop 경계)
+            alt_lon = "go" if lon == "stop" else "stop"
+            reasons.append(f"seg{k}:stop_speed_margin")
 
-        # 좌우 행동
+        # 좌우 행동: 회전이 아닐 때의 라벨(lane change / offset / keep)을 먼저 정한다
         dh = np.degrees(g("dh"))
         on_conn = g("conn_overlap") > 0 or g("on_conn_start") > 0
         i0 = lane_index(g("d_start"), g("wl_start"), g("wr_start"))
@@ -372,44 +373,48 @@ def classify(f: Dict[str, float], th: Optional[Dict[str, float]] = None) -> Deci
         # 도로가 굽은 구간에서는 사람이 코너 안쪽으로 가로지르므로 offset 기준을 크게 둔다
         curved = abs(np.degrees(g("lane_dh"))) >= th["curve_deg"]
         off_min = th["offset_min_curve"] if curved else th["offset_min"]
-        amb_lat = False
-        if on_conn and abs(dh) >= th["turn_min_deg"]:
-            lat = "turn_left" if dh > 0 else "turn_right"
-            lat_strength = abs(dh) / th["turn_max_deg"]
-            if abs(abs(dh) - th["turn_min_deg"]) < th["turn_margin_deg"]:
-                amb_lat = True
-                reasons.append(f"seg{k}:turn_margin")  # 방향 변화가 turn 기준 근처 (turn/keep 경계)
-        elif i1 != i0:
-            lat = "lane_change_left" if i1 > i0 else "lane_change_right"
-            lat_strength = g("vlat_peak") / th["vlat_max"]
+        offset_dir = "offset_left" if dd > 0 else "offset_right"
+        near_offset = abs(abs(dd) - off_min) < th["offset_margin"]
+        if i1 != i0:
+            nt_lat = "lane_change_left" if i1 > i0 else "lane_change_right"
+            nt_strength, nt_alt = g("vlat_peak") / th["vlat_max"], ""
         elif abs(dd) >= off_min:
-            lat = "offset_left" if dd > 0 else "offset_right"
-            lat_strength = abs(dd) / th["offset_max"]
-            if abs(abs(dd) - off_min) < th["offset_margin"]:
-                amb_lat = True
-                reasons.append(f"seg{k}:offset_margin")  # 옆 거리 변화가 offset 기준 근처 (offset/keep 경계)
+            nt_lat, nt_strength = offset_dir, abs(dd) / th["offset_max"]
+            nt_alt = "keep_lane" if near_offset else ""
         else:
-            lat, lat_strength = "keep_lane", 0.0
-            if abs(abs(dd) - off_min) < th["offset_margin"]:
-                amb_lat = True
-                reasons.append(f"seg{k}:offset_margin")
-            if on_conn and abs(abs(dh) - th["turn_min_deg"]) < th["turn_margin_deg"]:
-                amb_lat = True
-                reasons.append(f"seg{k}:turn_margin")
+            nt_lat, nt_strength = "keep_lane", 0.0
+            nt_alt = offset_dir if near_offset else ""
+
+        turn_dir = "turn_left" if dh > 0 else "turn_right"
+        near_turn = on_conn and abs(abs(dh) - th["turn_min_deg"]) < th["turn_margin_deg"]
+        if near_turn:
+            reasons.append(f"seg{k}:turn_margin")  # 방향 변화가 turn 기준 근처 (turn/keep 경계)
+        if on_conn and abs(dh) >= th["turn_min_deg"]:
+            lat, lat_strength = turn_dir, abs(dh) / th["turn_max_deg"]
+            alt_lat = nt_lat if near_turn else ""
+        else:
+            lat, lat_strength = nt_lat, nt_strength
+            alt_lat = turn_dir if near_turn else nt_alt
+            if nt_alt:
+                reasons.append(f"seg{k}:offset_margin")  # 옆 거리 변화가 offset 기준 근처 (offset/keep 경계)
+
+        # 구조적 애매함: 어느 차선 기준인지부터 불분명하다 (학습과 평가에서 뺀다)
+        structural = False
         if not lat.startswith("turn"):
             # 차선 경계 근처에서 끝나거나 시작하면 lane change와 offset/keep이 흔들린다
             if min(boundary_margin(g("d_start"), g("wl_start"), g("wr_start")),
                    boundary_margin(g("d_end"), g("wl_end"), g("wr_end"))) < th["lat_boundary_margin"]:
-                amb_lat = True
+                structural = True
                 reasons.append(f"seg{k}:near_boundary")
             if np.degrees(g("hrel_max")) > th["heading_rel_max_deg"]:
-                amb_lat = True
+                structural = True
                 reasons.append(f"seg{k}:off_lane_heading")
         if g("beyond") > 0:
-            amb_lat = True
+            structural = True
             reasons.append(f"seg{k}:beyond_chain")
         segs.append(Segment(lon, float(np.clip(lon_strength, 0, 1)), lat, float(np.clip(lat_strength, 0, 1)),
-                            bool(amb_lon), bool(amb_lat)))
+                            ambiguous_lon=bool(alt_lon), ambiguous_lat=bool(alt_lat) or structural,
+                            alt_lon=alt_lon, alt_lat=alt_lat, structural=structural))
     return Decision(segs, valid=True, reason=";".join(reasons))
 
 
