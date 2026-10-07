@@ -37,6 +37,8 @@ def load_model(run: str) -> Planner:
 def set_table(name: str) -> pd.DataFrame:
     if name == "val":
         df = pd.read_parquet(ROOT / "exp/l3/train_bundle_val.parquet")
+    elif name == "train5k":  # 학습 묶음에서 무작위 5천 개 (학습 데이터를 따르는지 보는 진단용, 시드 0)
+        df = pd.read_parquet(ROOT / "exp/l3/train_bundle_train.parquet").sample(n=5000, random_state=0)
     else:
         df = pd.read_parquet(ROOT / f"data_lists/eval/{name}.parquet")
         if name == "D3":
@@ -90,7 +92,7 @@ def main():
     for s in args.sets:
         t0 = time.time()
         df = set_table(s)
-        res = predict(model, feats["navtrain" if s == "val" else "navtest"], df, args.noise_seed)
+        res = predict(model, feats["navtrain" if s in ("val", "train5k") else "navtest"], df, args.noise_seed)
         suffix = "" if args.noise_seed == 0 else f"_noise{args.noise_seed}"
         res.to_parquet(out / f"{s}{suffix}.parquet", index=False)
         print(f"[{args.run}] {s}: {len(res):,} rows ({time.time() - t0:.1f}s)", flush=True)

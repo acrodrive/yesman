@@ -72,7 +72,7 @@ def judge_log(args):
 def run_set(run, name, workers):
     df = pd.read_parquet(EXP / f"eval/{run}/{name}.parquet")
     df["i"] = np.arange(len(df))
-    split = "navtrain" if name == "val" else "navtest"
+    split = "navtrain" if name in ("val", "train5k") else "navtest"
     cols = ["i", "token", "pred_poses"] + [c for c in df.columns if c.startswith("d_seg")]
     tasks = [(split, log, g[cols].to_dict("records")) for log, g in df.groupby("log_name")]
     tasks.sort(key=lambda t: -len(t[2]))
@@ -113,7 +113,7 @@ def main():
     summ = json.load(open(summ_path)) if summ_path.exists() else {}
     for name in args.sets:
         out = run_set(args.run, name, args.workers)
-        by = {"D1": "cf_name", "val": "sample_type", "D2": "category"}.get(name)
+        by = {"D1": "cf_name", "val": "sample_type", "train5k": "sample_type", "D2": "category"}.get(name)
         summ[name] = summarize(out, by)
         print(json.dumps(summ[name]["all"]))
     json.dump(summ, open(summ_path, "w"), indent=1)

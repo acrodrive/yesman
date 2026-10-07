@@ -36,6 +36,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", required=True)
     ap.add_argument("--target", type=float, default=0.05, help="검증 세트 청개구리 비율 상한")
+    ap.add_argument("--val_only", action="store_true", help="검증 세트 지표만 (CF⁻ 비율 고르기용)")
     args = ap.parse_args()
     d = EXP / f"eval/{args.run}"
     val = pd.read_parquet(d / "val.parquet")
@@ -56,13 +57,17 @@ def main():
     top = np.array(REASONS)[logits.argmax(1)]
     out["val_reason_top1_in_label"] = float(np.mean([t in str(r).split("+") for t, r in
                                                      zip(top[neg], val.reason.to_numpy()[neg])]))
-    for name in ("D0", "D1"):
+    for name in (() if args.val_only else ("D0", "D1")):
         f = pd.read_parquet(d / f"{name}_l1.parquet")
         acc = f.p.to_numpy() >= tau
         out[name] = {"n": int(len(f)), "follow": float((acc & f.follow).mean()),
                      "mismatch": float((acc & ~f.follow).mean()), "frog": float((~acc).mean()),
                      "follow_if_ignore_flag": float(f.follow.mean())}
-    json.dump(out, open(d / "flag_threshold.json", "w"), indent=1)
+    if args.val_only:  # 검증 세트에서 경로만의 CF⁺ 따르기 (flag 무시)
+        f = pd.read_parquet(d / "val_l1.parquet")
+        f = f[f.visibility != "unseen"]
+        out["val_cf_pos_follow_path"] = float(f[f.sample_type == "cf_pos"].follow.mean())
+    json.dump(out, open(d / ("flag_threshold_val.json" if args.val_only else "flag_threshold.json"), "w"), indent=1)
     print(json.dumps(out, indent=1))
 
 
