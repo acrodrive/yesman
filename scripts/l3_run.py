@@ -66,7 +66,7 @@ def run_log(args):
     loader = scene_loader(split, [log], [r["token"] for r in rows])
     out = []
     for r in rows:
-        t0 = time.time()
+        t0, n0 = time.time(), len(out)
         try:
             scene = loader.get_scene_from_token(r["token"])
             ctx = _L2.context(scene, mcl.get_from_token(r["token"]))
@@ -101,7 +101,8 @@ def run_log(args):
         except Exception as e:
             out.append({"token": r["token"], "log_name": log, "cf_name": "error",
                         "status": "error", "reason": f"{type(e).__name__}: {e} | {traceback.format_exc(limit=2)}"})
-        out[-1]["scene_seconds"] = time.time() - t0
+        if len(out) > n0:  # --only_turn에서 회전 CF가 없는 장면은 행이 없다
+            out[-1]["scene_seconds"] = time.time() - t0
     return out
 
 
