@@ -10,7 +10,7 @@
   노이즈를 걷어 내는 도중의 경로는 구조적으로 보지 않으므로, 시작 노이즈가 달라도 flag가 바뀌지 않는다.
   flag head: 실행 가능 logit 하나 (p = sigmoid). 근거 head: 충돌 / 도로 이탈 / 역주행 logit (여러 개일 수 있음).
 
-diffusion: cosine schedule(T=1000), x0 예측, 학습은 L1, 샘플링은 DDIM(eta=0, 기본 10단계). 경로는 학습 세트
+diffusion: cosine schedule(T=1000), x0 예측(cfg.pred, 10단계에서 v 예측 시험), 학습은 L1(cfg.loss), 샘플링은 DDIM(eta=0, 기본 10단계). 경로는 학습 세트
 목표 경로의 (시점, 축)별 평균과 표준편차로 정규화한다. 앵커는 쓰지 않는다(14절 "작게 시작").
 """
 
@@ -42,6 +42,8 @@ class ModelConfig:
     use_decision: bool = True  # False: B1 (결정을 보지 않는다)
     judge: bool = False  # True: 판단 토큰과 head를 쓴다 (제안 방법)
     T: int = 1000  # diffusion 학습 시간 단계 수
+    pred: str = "x0"  # 디코더가 예측하는 것: x0 (깨끗한 경로) / v (v = sqrt(ac)·eps − sqrt(1−ac)·x0, 10단계 시험)
+    loss: str = "l1"  # 경로 손실: l1 / mse
 
     def to_dict(self):
         return asdict(self)
@@ -141,9 +143,12 @@ class Planner(nn.Module):
         B = x0.shape[0]
         t = torch.randint(0, self.cfg.T, (B,), device=x0.device)
         ac = self.alphas_cumprod[t][:, None, None]
-        z_t = ac.sqrt() * x0 + (1 - ac).sqrt() * torch.randn_like(x0)
+        eps = torch.randn_like(x0)
+        z_t = ac.sqrt() * x0 + (1 - ac).sqrt() * eps
         pred = self.denoise(z_t, t, mem)
-        l_traj = (pred - x0).abs().mean((1, 2))
+        target = x0 if self.cfg.pred == "x0" else ac.sqrt() * eps - (1 - ac).sqrt() * x0
+        diff = pred - target
+        l_traj = (diff.abs() if self.cfg.loss == "l1" else diff ** 2).mean((1, 2))
         w = traj_weight if traj_weight is not None else torch.ones_like(l_traj)
         out = {"traj": (l_traj * w).sum() / w.sum().clamp(min=1e-6)}
         if self.cfg.judge and flag is not None:
@@ -165,11 +170,13 @@ class Planner(nn.Module):
         ts = torch.linspace(self.cfg.T - 1, 0, n_steps, device=mem.device).round().long()
         for i, t in enumerate(ts):
             tt = t.expand(B)
-            x0 = self.denoise(z, tt, mem)
+            out = self.denoise(z, tt, mem)
+            ac = self.alphas_cumprod[t]
+            x0 = out if self.cfg.pred == "x0" else ac.sqrt() * z - (1 - ac).sqrt() * out
             if i == len(ts) - 1:
                 z = x0
                 break
-            ac, ac_next = self.alphas_cumprod[t], self.alphas_cumprod[ts[i + 1]]
+            ac_next = self.alphas_cumprod[ts[i + 1]]
             eps = (z - ac.sqrt() * x0) / (1 - ac).sqrt()
             z = ac_next.sqrt() * x0 + (1 - ac_next).sqrt() * eps  # DDIM, eta = 0
         out = {"poses": self.denormalize(z)}

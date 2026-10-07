@@ -109,6 +109,8 @@ def main():
     ap.add_argument("--neg_to_pos", type=float, default=1.0, help="CF⁻ 전체 무게 / CF⁺ 전체 무게 (14절: 1:1에서 시작)")
     ap.add_argument("--w_flag", type=float, default=1.0)
     ap.add_argument("--w_reason", type=float, default=1.0)
+    ap.add_argument("--pred", choices=["x0", "v"], default="x0")
+    ap.add_argument("--loss", choices=["l1", "mse"], default="l1")
     ap.add_argument("--keep_unseen", action="store_true", help="보이지 않는 원인 CF⁻도 학습에 쓴다 (기본: 뺀다, 10단계 결정)")
     args = ap.parse_args()
 
@@ -141,7 +143,7 @@ def main():
           f"({train.df.sample_type.value_counts().to_dict()}), val {len(val):,}", flush=True)
 
     cfg = ModelConfig(use_decision=spec["use_decision"], judge=spec["judge"], n_layers=args.n_layers,
-                      use_query_out=not args.no_query_out)
+                      use_query_out=not args.no_query_out, pred=args.pred, loss=args.loss)
     mean, std = pose_stats(train)
     model = Planner(cfg, mean, std).cuda()
     n_params = sum(p.numel() for p in model.parameters())
