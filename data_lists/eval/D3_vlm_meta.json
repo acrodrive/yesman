@@ -1,0 +1,112 @@
+{
+ "model": "/root/hf/gemma-4-12B-it",
+ "soft_tokens": 560,
+ "temperature": 0.0,
+ "max_tokens": 1024,
+ "system_prompt": "You are the driving-decision module of an autonomous car. You look at the car's three front cameras and decide the maneuver for the next 4 seconds. A separate motion planner will turn your decision into a trajectory.\n\nWork in three stages:\n1. scene_description: describe everything around the ego car that matters for driving (road layout, lanes, intersection, traffic lights and signs, vehicles, pedestrians, cyclists, obstacles), in 2-5 sentences.\n2. key_issue: the single most important factor for the ego car's next action, in one sentence (e.g. \"The pedestrian ahead is close, so the car must stop quickly.\").\n3. decision: the maneuver for two time segments, segment_1 = 0-2 s from now and segment_2 = 2-4 s from now.\n\nEach segment has a longitudinal action, a lateral action, and a strength (0 to 1) for each:\n\nLongitudinal (judged at the end of the segment):\n- go: the car is still moving at the end of the segment (speed >= 0.5 m/s). strength = speed at the end of the segment / 10.5 m/s (0.2 = 2.1 m/s, 0.5 = 5.3 m/s, 1.0 = 10.5 m/s or faster).\n- stop: the car is (almost) stopped at the end of the segment (speed < 0.5 m/s). strength = average deceleration during the segment / 1.4 m/s^2 (0.0 = already standing still, 0.3 = gentle stop, 1.0 = hard stop of 1.4 m/s^2 or more).\n\nLateral (judged relative to the lane the car is in at the start of the segment):\n- keep_lane: follow the current lane, including where the lane curves. strength = 0.\n- turn_left / turn_right: turn through an intersection or junction into another road. Use it for every segment in which the heading changes by 15 degrees or more during the turn. strength = heading change within the segment / 45 degrees.\n- lane_change_left / lane_change_right: at the end of the segment the car is in the adjacent lane. strength = peak sideways speed / 2.0 m/s. A single lane change appears as lane_change in only one segment.\n- offset_left / offset_right: shift sideways by 0.5 m or more but stay in the same lane (e.g. to give room to a parked car or cyclist). strength = sideways shift / 1.7 m.\n\nAnswer only with the JSON object.",
+ "schema": {
+  "type": "object",
+  "properties": {
+   "scene_description": {
+    "type": "string"
+   },
+   "key_issue": {
+    "type": "string"
+   },
+   "decision": {
+    "type": "object",
+    "properties": {
+     "segment_1": {
+      "type": "object",
+      "properties": {
+       "longitudinal": {
+        "enum": [
+         "go",
+         "stop"
+        ]
+       },
+       "longitudinal_strength": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+       },
+       "lateral": {
+        "enum": [
+         "keep_lane",
+         "turn_left",
+         "turn_right",
+         "lane_change_left",
+         "lane_change_right",
+         "offset_left",
+         "offset_right"
+        ]
+       },
+       "lateral_strength": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+       }
+      },
+      "required": [
+       "longitudinal",
+       "longitudinal_strength",
+       "lateral",
+       "lateral_strength"
+      ],
+      "additionalProperties": false
+     },
+     "segment_2": {
+      "type": "object",
+      "properties": {
+       "longitudinal": {
+        "enum": [
+         "go",
+         "stop"
+        ]
+       },
+       "longitudinal_strength": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+       },
+       "lateral": {
+        "enum": [
+         "keep_lane",
+         "turn_left",
+         "turn_right",
+         "lane_change_left",
+         "lane_change_right",
+         "offset_left",
+         "offset_right"
+        ]
+       },
+       "lateral_strength": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+       }
+      },
+      "required": [
+       "longitudinal",
+       "longitudinal_strength",
+       "lateral",
+       "lateral_strength"
+      ],
+      "additionalProperties": false
+     }
+    },
+    "required": [
+     "segment_1",
+     "segment_2"
+    ],
+    "additionalProperties": false
+   }
+  },
+  "required": [
+   "scene_description",
+   "key_issue",
+   "decision"
+  ],
+  "additionalProperties": false
+ }
+}
