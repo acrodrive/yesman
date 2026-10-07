@@ -156,10 +156,12 @@ class Planner(nn.Module):
 
     # ---- 샘플링 ----
     @torch.no_grad()
-    def sample(self, keyval, query_out, dec=None, n_steps: int = 10, generator=None) -> Dict[str, torch.Tensor]:
+    def sample(self, keyval, query_out, dec=None, n_steps: int = 10, generator=None,
+               z0: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+        """z0: 시작 노이즈 (B, 8, 3). 주지 않으면 generator로 뽑는다."""
         mem = self.memory(keyval, query_out, dec)
         B = mem.shape[0]
-        z = torch.randn(B, N_POSES, POSE_DIM, device=mem.device, generator=generator)
+        z = z0 if z0 is not None else torch.randn(B, N_POSES, POSE_DIM, device=mem.device, generator=generator)
         ts = torch.linspace(self.cfg.T - 1, 0, n_steps, device=mem.device).round().long()
         for i, t in enumerate(ts):
             tt = t.expand(B)
