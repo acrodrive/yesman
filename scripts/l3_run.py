@@ -30,7 +30,18 @@ from yesman.l2 import L2, L2Config, PathBank, row_to_decision
 from yesman.l3 import categorize, cf_menu, change_type, collision_cause_visibility, weaker
 
 EXP = Path(os.environ["NAVSIM_EXP_ROOT"])
+TURN_CFS = ("turn_L", "turn_R", "turn_late_L", "turn_late_R")
 _L2 = None
+
+
+def judge(ctx, d, seed, is_cf: bool):
+    """L2 판정 + 6단계 규칙: 교차로 회전 차선열 없이(ego 좌표로 옮겨) 판정한 turn CF가 "가능"이면 판정 불가로 바꾼다.
+    4초 안에 길을 벗어나지 않았을 뿐, 그 뒤에 실행할 수 있는지는 확인할 수 없기 때문이다(계획서 13.4의 4초 한계)."""
+    res = _L2.judge(ctx, d, np.random.default_rng(seed))
+    has_turn = any(s.lat.startswith("turn") for s in d.segments)
+    if is_cf and has_turn and res.mode == "ego" and res.status == "feasible":
+        res.status, res.reason = "undetermined", "turn_off_intersection_unverified"
+    return res
 
 
 def init_worker(cfg_dict):
@@ -50,7 +61,7 @@ def _row(token, log, name, d: Decision, res, d0: Decision):
 
 
 def run_log(args):
-    split, cache, log, rows, n_cf, skip_original = args
+    split, cache, log, rows, n_cf, skip_original, only_turn = args
     mcl = MetricCacheLoader(EXP / f"metric_cache/{cache}")
     loader = scene_loader(split, [log], [r["token"] for r in rows])
     out = []
@@ -66,6 +77,9 @@ def run_log(args):
                 rng = np.random.default_rng(zlib.crc32(f"{r['token']}:menu".encode()))
                 names = sorted(rng.choice(names, size=n_cf, replace=False))
             decs = {"original": d0, **{k: menu[k] for k in names}}
+            if only_turn:  # 회전이 들어간 판정만 다시 돌린다 (6단계 수정)
+                decs = {k: v for k, v in decs.items()
+                        if k in TURN_CFS or (k == "original" and any(x.lat.startswith("turn") for x in v.segments))}
             for name, d in decs.items():
                 seed = zlib.crc32(f"{r['token']}:{name}".encode())
                 if name == "original" and skip_original:  # 학습 장면: 사람이 실제로 한 결정이므로 판정하지 않는다
@@ -73,11 +87,11 @@ def run_log(args):
                                 "change_type": "original", "decision": str(d),
                                 **{f"d_{k}": v for k, v in d.to_flat().items() if k.startswith("seg")}})
                     continue
-                res = _L2.judge(ctx, d, np.random.default_rng(seed))
+                res = judge(ctx, d, seed, is_cf=name != "original")
                 row = _row(r["token"], log, name, d, res, d0)
                 if name != "original" and res.status == "infeasible":
                     w = weaker(d0, d)
-                    wres = _L2.judge(ctx, w, np.random.default_rng(seed + 1)) if w is not None else None
+                    wres = judge(ctx, w, seed + 1, is_cf=True) if w is not None else None
                     row["weaker_decision"] = str(w) if w is not None else ""
                     row["weaker_status"] = wres.status if wres is not None else "none"
                     row["category"] = categorize(res.fail_frac, wres is not None and wres.status == "feasible")
@@ -99,6 +113,8 @@ def main():
     ap.add_argument("--logs", type=Path, default=None, help="이 로그들만 (줄마다 로그 이름)")
     ap.add_argument("--n_cf", type=int, default=0, help="장면마다 CF를 이만큼 무작위로 고른다 (0: 메뉴 전부)")
     ap.add_argument("--skip_original", action="store_true", help="원래 결정은 L2로 판정하지 않는다 (학습 장면)")
+    ap.add_argument("--only_turn", action="store_true", help="회전 CF와 회전이 있는 원래 결정만 다시 판정한다")
+    ap.add_argument("--merge_into", type=Path, default=None, help="이 표의 같은 (token, cf_name) 행을 새 결과로 바꿔 저장한다")
     ap.add_argument("--max_scenes", type=int, default=None)
     ap.add_argument("--workers", type=int, default=16)
     ap.add_argument("--name", required=True)
@@ -114,7 +130,8 @@ def main():
     if args.max_scenes:
         lab = lab.sample(n=min(args.max_scenes, len(lab)), random_state=0)
     print(f"{args.split}: {len(lab):,} usable scenes in {lab.log_name.nunique()} logs", flush=True)
-    tasks = [(args.split, args.cache or args.split, log, g.to_dict("records"), args.n_cf, args.skip_original)
+    tasks = [(args.split, args.cache or args.split, log, g.to_dict("records"), args.n_cf, args.skip_original,
+              args.only_turn)
              for log, g in lab.groupby("log_name")]
     tasks.sort(key=lambda t: -len(t[3]))  # 큰 로그부터 (병렬 끝부분의 빈 시간을 줄인다)
     t0, rows = time.time(), []
@@ -124,6 +141,12 @@ def main():
             if i % 10 == 0 or i == len(tasks):
                 print(f"{i}/{len(tasks)} logs, {len(rows)} rows, {time.time() - t0:.0f}s", flush=True)
     df = pd.DataFrame(rows)
+    if args.merge_into:
+        old = pd.read_parquet(args.merge_into)
+        new_keys = set(zip(df.token, df.cf_name))
+        keep = [k not in new_keys for k in zip(old.token, old.cf_name)]
+        print(f"merge: {len(old)} old rows, replace {len(old) - sum(keep)}, new rows {len(df)}")
+        df = pd.concat([old[keep], df], ignore_index=True)
     out = EXP / f"l3/{args.name}.parquet"
     out.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(out, index=False)

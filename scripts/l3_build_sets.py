@@ -41,7 +41,7 @@ def stats(df: pd.DataFrame, title: str) -> str:
     lines.append(f"- 장면 {n_scene:,}개, 판정 {len(df):,}개 (원래 결정 포함), 오류 {(df.status == 'error').sum()}\n")
     t = df[df.cf_name != "error"].groupby("cf_name").status.value_counts().unstack().fillna(0).astype(int)
     t["합계"] = t.sum(axis=1)
-    lines.append("| 결정 | " + " | ".join(t.columns) + " |\n| --- " * (len(t.columns) + 1) + "|")
+    lines.append("| 결정 | " + " | ".join(t.columns) + " |\n" + "| --- " * (len(t.columns) + 1) + "|")
     for k, r in t.iterrows():
         lines.append(f"| {k} | " + " | ".join(f"{v:,}" for v in r) + " |")
     cf = df[(df.cf_name != "original") & (df.status == "infeasible")]
@@ -55,7 +55,7 @@ def stats(df: pd.DataFrame, title: str) -> str:
             lines.append(f"| {k} | {r.n:,} | {r.unseen:,} | {r.unknown:,} | {r['main(unseen 제외)']:,} |")
         lines.append("\n### CF⁻ 기준 x 결정 종류\n")
         ct = pd.crosstab(cf.cf_name, cf.category)
-        lines.append("| 결정 | " + " | ".join(ct.columns) + " |\n| --- " * (len(ct.columns) + 1) + "|")
+        lines.append("| 결정 | " + " | ".join(ct.columns) + " |\n" + "| --- " * (len(ct.columns) + 1) + "|")
         for k, r in ct.iterrows():
             lines.append(f"| {k} | " + " | ".join(f"{v:,}" for v in r) + " |")
         lines.append("\n### CF⁻ 판단 근거 (대표 후보가 떨어진 항목)\n")

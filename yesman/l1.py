@@ -526,3 +526,45 @@ def embed_on_lane(ref: LaneReference, s_rel: np.ndarray, d_rel: np.ndarray, hrel
     loc[:, :2] -= loc[0, :2]
     loc[:, 2] = _wrap(loc[:, 2] - loc[0, 2])
     return loc[1:]
+
+
+TURN_REF_WINDOW = 60.0  # 회전 차선열을 찾을 때 방향 변화를 재는 구간 [m]
+TURN_REF_MIN_DEG = 45.0  # 이만큼 이상 돌아야 회전 차선열로 본다 [deg]
+
+
+def turn_reference(ego_pose: Sequence[float], map_api: AbstractMap, side: str) -> Optional[LaneReference]:
+    """출발 차선에서 이어지는 차선열 중 side(left/right) 방향으로 도는 것(교차로 회전)을 고른다 (6단계).
+
+    조건: 교차로 연결 차선을 지나고, 출발점부터 앞 60 m 동안 방향이 그 쪽으로 45도 이상 바뀐다.
+    여럿이면 출발 옆 거리가 가장 작은 것, 그다음 연결 차선이 가장 가까이에서 시작하는 것을 고른다. 없으면 None.
+    """
+    x, y, h = ego_pose
+    cands = _start_candidates(map_api, x, y, h)
+    if not cands:
+        return None
+    starts = {e.id: e for e, _ in cands}
+    for e, _ in cands:
+        if _Polyline.from_chain([e]).project(np.array([x, y]))[4]:
+            for o in e.obj.incoming_edges:
+                starts.setdefault(o.id, _edge(map_api, o))
+    sign = 1.0 if side == "left" else -1.0
+    best = None
+    for e in starts.values():
+        s0, _, _, _, _ = _Polyline.from_chain([e]).project(np.array([x, y]))
+        for chain in _chains(map_api, e, need=s0 + REF_LENGTH):
+            if not any(c.is_connector for c in chain):
+                continue
+            pl = _Polyline.from_chain(chain)
+            s, d, _, th0, beyond = pl.project(np.array([x, y]), -np.inf, s0 + 1.0)
+            if beyond or pl.s[-1] - s < 30.0:
+                continue
+            i1 = min(int(np.searchsorted(pl.s, min(s + TURN_REF_WINDOW, pl.s[-1]))), len(pl.xy) - 2)
+            th1 = np.arctan2(*(pl.xy[i1 + 1] - pl.xy[i1])[::-1])
+            if sign * np.degrees(_wrap(th1 - th0)) < TURN_REF_MIN_DEG:
+                continue
+            conn_start = min(pl.s[np.where(pl.edge_idx == k)[0][0]] for k, c in enumerate(pl.edges)
+                             if c.is_connector and np.any(pl.edge_idx == k))
+            key = (round(abs(d), 1), max(0.0, conn_start - s))
+            if best is None or key < best[0]:
+                best = (key, LaneReference(pl, s, d, np.asarray(ego_pose, dtype=np.float64)))
+    return best[1] if best else None

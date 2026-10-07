@@ -9,7 +9,9 @@
    - d에 turn이 없으면(keep / offset / lane change): 차선 기준으로 옮긴다. 원래 차선 기준의 (진행 거리, 옆 거리,
      차선 대비 방향) 시간표를 판정할 장면의 기준 차선(출발 차선에서 가장 곧게 이어지는 차선열) 위에 다시 그린다.
      속도와 옆 이동 모양은 사람 경로 그대로이고, 도로 모양만 이 장면에 맞춰진다.
-   - d에 turn이 있으면: ego 좌표 그대로 옮긴다 (교차로 회전은 그 교차로의 모양이 중요하므로).
+   - d에 turn이 있으면: 출발 차선에서 그 방향으로 도는 교차로 연결 차선열(앞 60 m 동안 45도 이상)이 있으면 그 위에
+     차선 기준으로 다시 그린다(6단계에서 추가. 이 교차로 모양을 따라 돈다). 그 차선열이 없거나, 다시 그린 후보 중
+     결정과 맞는 것이 n_min개 미만이면 ego 좌표 그대로 옮긴 후보로 판정한다(지금 위치에서 그 방향으로 꺾는 경로).
 3. 다시 라벨 붙이기: 옮긴 경로에 L1을 다시 돌려, 이 장면에서도 d̂ ≈ d이고 구조적 애매함이 없는 경로만 후보로 남긴다.
    후보가 n_min개 미만이면 "판정 불가"이다.
 4. 채점: 후보 중 무작위로 최대 k_score개를 NAVSIM v2 채점 도구로 한 번에 채점한다(human filter 적용).
@@ -28,7 +30,8 @@ import pandas as pd
 
 from navsim.planning.metric_caching.metric_cache import MetricCache
 from yesman.decision import Decision, Segment, same_decision
-from yesman.l1 import LaneReference, classify, embed_on_lane, extract_features, lane_reference, load_thresholds
+from yesman.l1 import (LaneReference, classify, embed_on_lane, extract_features, lane_reference, load_thresholds,
+                       turn_reference)
 from yesman.scoring import BatchScorer, feasibility
 
 EXP = Path(os.environ["NAVSIM_EXP_ROOT"])
@@ -46,6 +49,7 @@ class L2Config:
     k_score: int = 50  # 채점할 최대 후보 수
     seed: int = 0
     lane_embed: bool = True  # turn이 없는 결정은 차선 기준으로 옮긴다 (False: 모두 ego 좌표 그대로, 5단계 첫 버전)
+    turn_embed: bool = True  # turn 결정은 그 방향 회전 차선열이 있으면 그 위에 다시 그린다 (6단계에서 추가)
 
 
 @dataclass
@@ -134,6 +138,7 @@ class SceneContext:
     metric_cache: MetricCache
     human: Dict[str, float]  # human filter용 사람 경로 채점 결과
     ref: Optional[LaneReference] = None  # 기준 차선 (차선 기준으로 옮길 때)
+    turn_refs: Dict[str, Optional[LaneReference]] = field(default_factory=dict)  # left/right 회전 차선열 (필요할 때 구함)
     relabel_cache: Dict = field(default_factory=dict)  # (경로 모음 행 번호, 옮기는 방식) → (옮긴 경로, 이 장면에서의 L1)
 
 
@@ -151,12 +156,19 @@ class L2:
                             float(np.linalg.norm(st.ego_velocity[:2])), np.asarray(st.ego_pose), scene.map_api,
                             metric_cache, self.scorer.human_metrics(metric_cache), ref)
 
+    def turn_ref(self, ctx: SceneContext, side: str) -> Optional[LaneReference]:
+        if side not in ctx.turn_refs:
+            ctx.turn_refs[side] = turn_reference(ctx.ego_pose, ctx.map_api, side)
+        return ctx.turn_refs[side]
+
     def place(self, ctx: SceneContext, idx: int, mode: str) -> Tuple[Optional[np.ndarray], Optional[Decision]]:
-        """경로 모음의 경로 idx를 이 장면에 옮기고 L1을 다시 돌린다. (옮긴 경로, L1) 또는 (None, None)."""
+        """경로 모음의 경로 idx를 이 장면에 옮기고 L1을 다시 돌린다. (옮긴 경로, L1) 또는 (None, None).
+        mode: lane (곧은 기준 차선 위에 다시 그림), turn_left/turn_right (그 방향 회전 차선열 위에 다시 그림), ego"""
         key = (idx, mode)
         if key not in ctx.relabel_cache:
             b = self.bank
-            poses = (embed_on_lane(ctx.ref, b.pt_s[idx], b.pt_d[idx], b.pt_hrel[idx]) if mode == "lane"
+            ref = ctx.ref if mode == "lane" else (self.turn_ref(ctx, mode[5:]) if mode.startswith("turn_") else None)
+            poses = (embed_on_lane(ref, b.pt_s[idx], b.pt_d[idx], b.pt_hrel[idx]) if ref is not None
                      else b.poses[idx])
             dh = classify(extract_features(poses, ctx.v0, ctx.ego_pose, ctx.map_api), self.th) if poses is not None \
                 else None
@@ -173,17 +185,32 @@ class L2:
             pre = rng.choice(pre, size=self.cfg.k_relabel, replace=False)  # 무작위 순서
         else:
             pre = rng.permutation(pre)
-        has_turn = any(s.lat.startswith("turn") for s in d.segments)
-        res.mode = "lane" if (self.cfg.lane_embed and not has_turn and ctx.ref is not None) else "ego"
-        match, n_tried = [], 0
-        for idx in pre:
-            n_tried += 1
-            poses, dh = self.place(ctx, int(idx), res.mode)
-            if dh is not None and dh.usable and same_decision(d, dh):
-                match.append(int(idx))
-                if len(match) >= self.cfg.k_score:  # 채점할 만큼 모이면 그만 본다 (6단계에서 추가, 시간 단축)
-                    break
-        res.n_relabeled, res.n_match = n_tried, len(match)
+        turns = {s.lat[5:] for s in d.segments if s.lat.startswith("turn")}
+        if not self.cfg.lane_embed:
+            modes = ["ego"]
+        elif not turns:
+            modes = ["lane" if ctx.ref is not None else "ego"]
+        elif len(turns) == 1 and self.cfg.turn_embed and self.turn_ref(ctx, next(iter(turns))) is not None:
+            # 교차로 회전: 먼저 이 장면의 회전 차선열 위에 다시 그린 후보로 본다 (6단계). 결정과 맞는 후보가 n_min개
+            # 미만이면(예: 교차로가 멀어 4초 안에 돌 수 없음) ego 좌표 그대로 옮긴 후보로 다시 본다
+            modes = [f"turn_{next(iter(turns))}", "ego"]
+        else:
+            modes = ["ego"]
+        n_tried_all = 0
+        for mode in modes:
+            res.mode = mode
+            match, n_tried = [], 0
+            for idx in pre:
+                n_tried += 1
+                poses, dh = self.place(ctx, int(idx), mode)
+                if dh is not None and dh.usable and same_decision(d, dh):
+                    match.append(int(idx))
+                    if len(match) >= self.cfg.k_score:  # 채점할 만큼 모이면 그만 본다 (6단계에서 추가, 시간 단축)
+                        break
+            n_tried_all += n_tried
+            if len(match) >= self.cfg.n_min:
+                break
+        res.n_relabeled, res.n_match = n_tried_all, len(match)
         if len(match) < self.cfg.n_min:
             return res
         cand = list(rng.choice(match, size=min(self.cfg.k_score, len(match)), replace=False))
