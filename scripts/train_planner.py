@@ -45,14 +45,17 @@ def batch_inputs(feats, s, idx):
 def evaluate(model, feats, s, seeds=(0, 1, 2), n_steps=10, bs=1024):
     """DDIM으로 샘플링한 경로와 목표 경로의 오차 (샘플 종류별). seed마다 시작 노이즈를 바꾼다."""
     model.eval()
-    preds = []
+    preds, flags = [], []
     for seed in seeds:
         g = torch.Generator(device="cuda").manual_seed(seed)
         out = []
         for lo in range(0, len(s), bs):
             idx = torch.arange(lo, min(len(s), lo + bs), device="cuda")
             kv, qo, dec = batch_inputs(feats, s, idx)
-            out.append(model.sample(kv, qo, dec if model.cfg.use_decision else None, n_steps, g)["poses"])
+            o = model.sample(kv, qo, dec if model.cfg.use_decision else None, n_steps, g)
+            out.append(o["poses"])
+            if seed == seeds[0] and model.cfg.judge:
+                flags.append(o["flag_logit"])
         preds.append(torch.cat(out))
     model.train()
     P = torch.stack(preds)  # (n_seed, N, 8, 3)
@@ -65,7 +68,28 @@ def evaluate(model, feats, s, seeds=(0, 1, 2), n_steps=10, bs=1024):
         if m.any():
             res[st] = {"n": int(m.sum()), "ade": float(ade[:, m].mean()), "fde": float(fde[:, m].mean()),
                        "ade_p95": float(ade[:, m].quantile(0.95)), "seed_spread": float(spread[:, m].mean())}
+    if flags:  # 판단 head: p = sigmoid(flag_logit), 1 = ACCEPT. 판단 토큰은 노이즈와 무관하므로 seed 하나로 충분하다
+        p = torch.sigmoid(torch.cat(flags))
+        res["judge"] = judge_metrics(p, s.flag, s.stype)
     return res, P[0]
+
+
+def auc(score, label):
+    """ROC AUC (label 1을 양성으로, score가 클수록 양성)."""
+    order = torch.argsort(score)
+    ranks = torch.empty_like(order, dtype=torch.float64)
+    ranks[order] = torch.arange(1, len(score) + 1, device=score.device, dtype=torch.float64)
+    n1, n0 = float(label.sum()), float((1 - label).sum())
+    return float((ranks[label > 0.5].sum() - n1 * (n1 + 1) / 2) / (n1 * n0)) if n1 and n0 else float("nan")
+
+
+def judge_metrics(p, flag, stype, thr=0.5):
+    out = {"auc": auc(p, flag), "acc@0.5": float(((p >= thr).float() == flag).float().mean())}
+    for i, st in enumerate(SAMPLE_TYPES):
+        m = stype == i
+        if m.any():
+            out[f"reject@0.5_{st}"] = float((p[m] < thr).float().mean())
+    return out
 
 
 def main():
@@ -82,6 +106,10 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--n_layers", type=int, default=4)
     ap.add_argument("--no_query_out", action="store_true")
+    ap.add_argument("--neg_to_pos", type=float, default=1.0, help="CF⁻ 전체 무게 / CF⁺ 전체 무게 (14절: 1:1에서 시작)")
+    ap.add_argument("--w_flag", type=float, default=1.0)
+    ap.add_argument("--w_reason", type=float, default=1.0)
+    ap.add_argument("--keep_unseen", action="store_true", help="보이지 않는 원인 CF⁻도 학습에 쓴다 (기본: 뺀다, 10단계 결정)")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -98,7 +126,18 @@ def main():
         val = train
     else:
         val = load_bundle("val", feats, spec["sample_types"])
-    print(f"[{args.name}] model {args.model}: train {len(train):,} samples "
+    if not args.keep_unseen:  # 카메라 시야 밖 원인의 CF⁻는 학습과 검증에서 뺀다 (10단계 사용자 결정)
+        train = train.subset((train.df.visibility != "unseen").to_numpy())
+        if val is not train:
+            val = val.subset((val.df.visibility != "unseen").to_numpy())
+    # 샘플 무게: 원래 결정과 CF⁺는 1씩(B-순응과 같은 비율), CF⁻는 전체 무게가 CF⁺의 neg_to_pos배가 되게 한다
+    st = train.df.sample_type.to_numpy()
+    w = np.ones(len(train))
+    if (st == "cf_neg").any() and (st == "cf_pos").any():
+        w[st == "cf_neg"] = args.neg_to_pos * (st == "cf_pos").sum() / (st == "cf_neg").sum()
+    weights = torch.as_tensor(w, device="cuda", dtype=torch.float)
+    mix = {k: round(float(w[st == k].sum() / w.sum()), 3) for k in SAMPLE_TYPES if (st == k).any()}
+    print(f"[{args.name}] model {args.model}: train {len(train):,} samples, batch mix {mix} "
           f"({train.df.sample_type.value_counts().to_dict()}), val {len(val):,}", flush=True)
 
     cfg = ModelConfig(use_decision=spec["use_decision"], judge=spec["judge"], n_layers=args.n_layers,
@@ -113,10 +152,10 @@ def main():
     log = open(out_dir / "log.jsonl", "w")
     t0, run = time.time(), {}
     for step in range(1, args.steps + 1):
-        idx = torch.randint(len(train), (args.batch,), device="cuda")
+        idx = torch.multinomial(weights, args.batch, replacement=True)
         kv, qo, dec = batch_inputs(feats, train, idx)
         losses = model.loss(kv, qo, dec, train.target[idx], train.flag[idx], train.reason[idx])
-        loss = sum(losses.values())
+        loss = losses["traj"] + args.w_flag * losses.get("flag", 0) + args.w_reason * losses.get("reason", 0)
         opt.zero_grad(set_to_none=True)
         loss.backward()
         gn = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -137,12 +176,15 @@ def main():
             res, _ = evaluate(model, feats, val)
             print(f"  [eval step {step}] " + "  ".join(
                 f"{k}: ADE {v['ade']:.3f} FDE {v['fde']:.3f} p95 {v['ade_p95']:.3f} spread {v['seed_spread']:.3f}"
-                for k, v in res.items()), flush=True)
+                for k, v in res.items() if k != "judge"), flush=True)
+            if "judge" in res:
+                print("  [eval judge] " + " ".join(f"{k} {v:.3f}" for k, v in res["judge"].items()), flush=True)
             log.write(json.dumps({"step": step, "eval": res}) + "\n")
     torch.save({"model": model.state_dict(), "cfg": cfg.to_dict(), "args": vars(args), "argv": sys.argv}, out_dir / "model.pt")
     res, pred = evaluate(model, feats, val)
     json.dump({"eval": res, "args": vars(args), "cfg": cfg.to_dict(), "n_params": n_params,
-               "train_counts": train.df.sample_type.value_counts().to_dict(), "sec": time.time() - t0},
+               "train_counts": train.df.sample_type.value_counts().to_dict(), "batch_mix": mix,
+               "sec": time.time() - t0},
               open(out_dir / "eval.json", "w"), indent=1)
     # 그림용: 평가 샘플의 예측 경로 (seed 0)
     pd_out = val.df[["token", "log_name", "sample_type", "cf_name", "decision"]].copy()
