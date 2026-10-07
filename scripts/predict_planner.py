@@ -63,7 +63,7 @@ def predict(model, feats, df, noise_seed=0, bs=2048):
         sl = slice(lo, lo + bs)
         r = rows[sl]
         o = model.sample(feats["keyval"][r], feats["query_out"][r], dec[sl] if model.cfg.use_decision else None,
-                         z0=z0[sl])
+                         z0=z0[sl], bev=feats["bev_sem"][r] if model.cfg.use_bev_sem else None)
         for k in out:
             if k in o:
                 out[k].append(o[k].cpu())
@@ -88,7 +88,8 @@ def main():
     model = load_model(args.run)
     out = ROOT / "exp/eval" / args.run
     out.mkdir(parents=True, exist_ok=True)
-    feats = {"navtest": load_features("navtest"), "navtrain": load_features("navtrain")}
+    bev = model.cfg.use_bev_sem
+    feats = {"navtest": load_features("navtest", bev_sem=bev), "navtrain": load_features("navtrain", bev_sem=bev)}
     for s in args.sets:
         t0 = time.time()
         df = set_table(s)

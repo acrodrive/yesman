@@ -21,10 +21,10 @@ FEAT = ROOT / "exp/features/ltf"
 SAMPLE_TYPES = ("original", "cf_pos", "cf_neg")
 
 
-def load_features(split: str, device="cuda") -> Dict[str, object]:
+def load_features(split: str, device="cuda", bev_sem: bool = False) -> Dict[str, object]:
     tokens = FEAT.joinpath(split, "tokens.txt").read_text().split()
     out = {"tokens": tokens, "row": {t: i for i, t in enumerate(tokens)}}
-    for k in ("keyval", "query_out"):
+    for k in ("keyval", "query_out") + (("bev_sem",) if bev_sem else ()):
         out[k] = torch.from_numpy(np.load(FEAT / split / f"{k}.npy")).to(device)
     return out
 
