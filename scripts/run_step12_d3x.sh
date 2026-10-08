@@ -4,7 +4,8 @@ set -uo pipefail
 source /workspace/yesman/scripts/setup/env.sh
 cd /workspace/yesman
 L=logs/step12
-until grep -q "VLM31 done" $L/vlm31.log && grep -q "all done" $L/b3.log; do sleep 30; done
+until grep -q "VLM31 done" $L/vlm31b.log && grep -q "all done" $L/b3.log; do sleep 30; done
+[ -f exp/d3/d3x_gemma31b_raw.parquet ] || { echo "gemma31b raw 없음: 중단"; exit 1; }
 echo "=== judge $(date +%H:%M)"
 for spec in "d3x_gemma12b_ext scenes_ext" "d3x_qwen8b scenes_3k" "d3x_gemma31b scenes_3k"; do
   set -- $spec
