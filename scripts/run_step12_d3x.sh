@@ -4,11 +4,13 @@ set -uo pipefail
 source /workspace/yesman/scripts/setup/env.sh
 cd /workspace/yesman
 L=logs/step12
-until grep -q "VLM done" $L/vlm.log && grep -q "all done" $L/b3.log; do sleep 30; done
+until grep -q "VLM31 done" $L/vlm31.log && grep -q "all done" $L/b3.log; do sleep 30; done
 echo "=== judge $(date +%H:%M)"
-python scripts/d3_judge.py --name d3x_gemma12b_ext --scenes exp/d3/scenes_ext.parquet 2>&1 | grep -v -E "Warn|Loading" | tail -5
-python scripts/d3_judge.py --name d3x_qwen8b --scenes exp/d3/scenes_3k.parquet 2>&1 | grep -v -E "Warn|Loading" | tail -5
-python scripts/d3_judge.py --name d3x_gemma31b --scenes exp/d3/scenes_3k.parquet 2>&1 | grep -v -E "Warn|Loading" | tail -5
+for spec in "d3x_gemma12b_ext scenes_ext" "d3x_qwen8b scenes_3k" "d3x_gemma31b scenes_3k"; do
+  set -- $spec
+  [ -f exp/d3/$1.parquet ] && { echo "skip $1 (already judged)"; continue; }
+  python scripts/d3_judge.py --name $1 --scenes exp/d3/$2.parquet 2>&1 | grep -v -E "Warn|Loading" | tail -5
+done
 python - <<'PY'
 import pandas as pd, json, shutil
 from pathlib import Path
