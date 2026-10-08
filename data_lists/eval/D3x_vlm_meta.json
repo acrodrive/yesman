@@ -1,0 +1,29 @@
+{
+ "gemma12b": {
+  "model": "/root/hf/gemma-4-12B-it",
+  "mm_processor_kwargs": {
+   "max_soft_tokens": 560
+  },
+  "soft_tokens": 560,
+  "temperature": 0.0,
+  "max_tokens": 1024
+ },
+ "qwen8b": {
+  "model": "/root/hf/Qwen3-VL-8B-Instruct",
+  "mm_processor_kwargs": {
+   "max_pixels": 573440
+  },
+  "soft_tokens": 560,
+  "temperature": 0.0,
+  "max_tokens": 1024
+ },
+ "gemma31b": {
+  "model": "/root/hf/gemma-4-31B-it-qat-w4a16-ct",
+  "mm_processor_kwargs": {
+   "max_soft_tokens": 560
+  },
+  "soft_tokens": 560,
+  "temperature": 0.0,
+  "max_tokens": 1024
+ }
+}
