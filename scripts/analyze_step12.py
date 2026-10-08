@@ -31,6 +31,9 @@ ROOT = Path(os.environ["YESMAN_ROOT"])
 E = ROOT / "exp/eval"
 SEEDS = (0, 1)
 MODELS = {"B1": "B1", "B2": "B2", "B-순응": "Bcomply_rt", "B3": "B3_rt", "Ours": "Ours_w025_rt"}
+FINAL = "--final" in sys.argv  # 13단계: 최종 모델(CF⁺ 목표 합성)
+if FINAL:
+    MODELS = {"B1": "B1", "B2": "B2", "B-순응": "Bcomply_syn", "B3": "B3_syn", "Ours": "Ours_syn"}
 VLMS = {"Gemma 4 12B": "gemma12b", "Gemma 4 31B": "gemma31b", "Qwen3-VL 8B": "qwen8b"}
 TYPES = ("사람과 같음", "다르지만 안전", "가능하지만 위험", "불가능")
 SAFE = ["no_at_fault_collisions", "drivable_area_compliance", "driving_direction_compliance"]
@@ -71,7 +74,7 @@ def d3_types(name):
 
 
 def main():
-    out_dir, fig_dir = ROOT / "exp/step12", ROOT / "docs/figs/step12"
+    out_dir, fig_dir = (ROOT / "exp/step13", ROOT / "docs/figs/step13") if FINAL else (ROOT / "exp/step12", ROOT / "docs/figs/step12")
     out_dir.mkdir(parents=True, exist_ok=True)
     fig_dir.mkdir(parents=True, exist_ok=True)
     D2 = pd.read_parquet(ROOT / "data_lists/eval/D2.parquet", columns=["category", "visibility"])
@@ -110,7 +113,7 @@ def main():
                                         "rate_ci": wilson(int(ex[tt == ty].sum()), int((tt == ty).sum()))}
                                    for ty in ("불가능", "가능하지만 위험", "다르지만 안전")}
         R["d3x"][vname] = info
-    json.dump(R, open(out_dir / "results.json", "w"), indent=1, ensure_ascii=False, default=float)
+    json.dump(R, open(out_dir / ("results_step12.json" if FINAL else "results.json"), "w"), indent=1, ensure_ascii=False, default=float)
     tables(R)
     fig(R, fig_dir)
     print("done", out_dir)
@@ -159,8 +162,9 @@ def tables(R):
     L += ["", "### Ours가 VLM의 '불가능' 결정을 거부한 비율 (시드 0 / 1)", ""]
     for v, info in R["d3x"].items():
         L.append(f"- {v}: " + " / ".join(f"{info['exec'][run('Ours', s)]['불가능']['rejected']:.2f}" for s in SEEDS))
-    (ROOT / "logs/step12").mkdir(parents=True, exist_ok=True)
-    (ROOT / "logs/step12/tables.md").write_text("\n".join(L) + "\n")
+    d = ROOT / ("logs/step13" if FINAL else "logs/step12")
+    d.mkdir(parents=True, exist_ok=True)
+    (d / ("tables_step12.md" if FINAL else "tables.md")).write_text("\n".join(L) + "\n")
 
 
 def fig(R, fig_dir):

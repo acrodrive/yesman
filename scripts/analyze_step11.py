@@ -34,11 +34,14 @@ from yesman.plot_style import use_korean_font
 ROOT = Path(os.environ["YESMAN_ROOT"])
 E = ROOT / "exp/eval"
 MODELS = {"B1": "B1", "B2": "B2", "B-순응": "Bcomply_rt", "Ours": "Ours_w025_rt"}
+FINAL = "--final" in __import__("sys").argv  # 13단계: 최종 모델(CF⁺ 목표 합성, B3 포함)
+if FINAL:
+    MODELS = {"B1": "B1", "B2": "B2", "B-순응": "Bcomply_syn", "B3": "B3_syn", "Ours": "Ours_syn"}
 SEEDS = (0, 1)
 CATS = ("road", "agent", "strength")
 CAT_KO = {"road": "도로 모양", "agent": "다른 차·보행자", "strength": "세기"}
 # dataviz 기본 팔레트(검증된 순서). Ours가 주인공이므로 1번, 상한선은 기준선이라 회색
-COLOR = {"Ours": "#2a78d6", "B-순응": "#eb6834", "B2": "#1baf7a", "B1": "#eda100", "상한선": "#6b6a64",
+COLOR = {"Ours": "#2a78d6", "B-순응": "#eb6834", "B2": "#1baf7a", "B1": "#eda100", "B3": "#e87ba4", "상한선": "#6b6a64",
          "규칙 대체": "#2a78d6"}
 SAFE = ["no_at_fault_collisions", "drivable_area_compliance", "driving_direction_compliance"]
 
@@ -124,9 +127,9 @@ def d2_metrics(f, t, scores=None, rule_scores=None, reason_ok=None):
 
 
 def main():
-    out_dir = ROOT / "exp/step11"
+    out_dir = ROOT / ("exp/step13" if FINAL else "exp/step11")
     out_dir.mkdir(parents=True, exist_ok=True)
-    fig_dir = ROOT / "docs/figs/step11"
+    fig_dir = ROOT / ("docs/figs/step13" if FINAL else "docs/figs/step11")
     fig_dir.mkdir(parents=True, exist_ok=True)
     D1 = pd.read_parquet(ROOT / "data_lists/eval/D1.parquet", columns=["token", "cf_name"])
     D2 = pd.read_parquet(ROOT / "data_lists/eval/D2.parquet", columns=["token", "cf_name", "category", "visibility",
@@ -283,8 +286,9 @@ def write_tables(R):
             cells.append(" / ".join(f"{x['executed']:.2f} [{x['ci'][0]:.2f}, {x['ci'][1]:.2f}]" for x in v))
         rj = " / ".join(f"{d3['exec'][run(m, s)]['불가능']['rejected']:.2f}" for s in SEEDS)
         L.append(f"| {m} | {cells[0]} | {cells[1]} | {rj} |")
-    (ROOT / "logs/step11").mkdir(parents=True, exist_ok=True)
-    (ROOT / "logs/step11/tables.md").write_text("\n".join(L) + "\n")
+    d = ROOT / ("logs/step13" if FINAL else "logs/step11")
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "tables.md").write_text("\n".join(L) + "\n")
 
 
 def fig1(R, fig_dir):
@@ -306,7 +310,8 @@ def fig1(R, fig_dir):
             mk = "*" if m == "상한선" else "o"
             ax.scatter([x], [y], s=110 if m != "상한선" else 220, color=COLOR[m], marker=mk, zorder=5,
                        edgecolor="#fcfcfb", linewidth=2)
-            dx, dy, ha = {"B1": (0.012, -0.045, "left"), "Ours": (-0.015, -0.06, "right")}.get(m, (0.012, 0.012, "left"))
+            dx, dy, ha = {"B1": (0.012, -0.045, "left"), "Ours": (-0.015, -0.06, "right"),
+                      "B3": (0.012, -0.05, "left")}.get(m, (0.012, 0.012, "left"))
             ax.annotate(m + (" (τ)" if m == "Ours" else ""), (x, y), (x + dx, y + dy), fontsize=10, color="#3d3d3a", ha=ha)
         n = R[run("B2", 0)][f"D2_{c}"]["n"]
         ax.set_title(f"{CAT_KO[c]} 기준 (D2 n = {n:,})", fontsize=12, color="#1f1e1c")
@@ -334,7 +339,7 @@ def fig2(R, fig_dir):
     a1.set_xlim(0, max(share) * 1.35)
     a1.set_title(f"VLM 결정 유형 (판정 불가 {d3['counts'].get('판정 불가', 0)}개 제외, n = {d3['n_determined']})", fontsize=12)
     a1.spines[["top", "right"]].set_visible(False)
-    ms = ["B2", "B-순응", "Ours"]
+    ms = [m for m in ("B2", "B-순응", "B3", "Ours") if m in MODELS]
     x = np.arange(len(ms))
     for j, ty in enumerate(("불가능", "가능하지만 위험")):
         vals = [np.mean([d3["exec"][run(m, s)][ty]["executed"] for s in SEEDS]) for m in ms]

@@ -36,6 +36,10 @@ from yesman.plot_style import use_korean_font  # noqa: E402
 ROOT = Path(os.environ["YESMAN_ROOT"])
 E = ROOT / "exp/eval"
 RUNS = {"B2": "B2_seed0", "B-순응": "Bcomply_rt_seed0", "Ours": "Ours_w025_rt_seed0"}
+FINAL = "--final" in sys.argv  # 13단계: 최종 모델
+if FINAL:
+    RUNS = {"B2": "B2_seed0", "B-순응": "Bcomply_syn_seed0", "Ours": "Ours_syn_seed0"}
+FIG = "step13" if FINAL else "step11"
 STYLE = {"사람": dict(color="k", ls="--", lw=1.5), "B2": dict(color="#1baf7a", ls="-", lw=2),
          "B-순응": dict(color="#eb6834", ls="-", lw=2), "Ours": dict(color="#2a78d6", ls="-", lw=3.2)}
 SAFE = ["no_at_fault_collisions", "drivable_area_compliance", "driving_direction_compliance"]
@@ -119,7 +123,7 @@ def main():
         loader = scene_loader("navtest", rows.log_name, rows.token, sensor_config=sc)
         for i, row in enumerate(rows.to_dict("records")):
             print(" ", draw(loader.get_scene_from_token(row["token"]), row,
-                            ROOT / f"docs/figs/step11/{name}_{i}.png", title))
+                            ROOT / f"docs/figs/{FIG}/{name}_{i}.png", title))
 
 
 if __name__ == "__main__":
