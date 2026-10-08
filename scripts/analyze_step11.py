@@ -306,8 +306,8 @@ def fig1(R, fig_dir):
             mk = "*" if m == "상한선" else "o"
             ax.scatter([x], [y], s=110 if m != "상한선" else 220, color=COLOR[m], marker=mk, zorder=5,
                        edgecolor="#fcfcfb", linewidth=2)
-            dx, dy = (0.012, 0.012) if m != "B1" else (0.012, -0.045)
-            ax.annotate(m + (" (τ)" if m == "Ours" else ""), (x, y), (x + dx, y + dy), fontsize=10, color="#3d3d3a")
+            dx, dy, ha = {"B1": (0.012, -0.045, "left"), "Ours": (-0.015, -0.06, "right")}.get(m, (0.012, 0.012, "left"))
+            ax.annotate(m + (" (τ)" if m == "Ours" else ""), (x, y), (x + dx, y + dy), fontsize=10, color="#3d3d3a", ha=ha)
         n = R[run("B2", 0)][f"D2_{c}"]["n"]
         ax.set_title(f"{CAT_KO[c]} 기준 (D2 n = {n:,})", fontsize=12, color="#1f1e1c")
         ax.set_xlabel("D1 따르기 비율 (실행 가능한 결정을 ACCEPT하고 결정대로)")
