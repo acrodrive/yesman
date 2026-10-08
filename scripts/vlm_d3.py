@@ -115,6 +115,7 @@ def main():
     ap.add_argument("--soft_tokens", type=int, default=560, help="이미지 하나당 시각 토큰 수 (70/140/280/560/1120)")
     ap.add_argument("--max_tokens", type=int, default=1024)
     ap.add_argument("--chunk", type=int, default=100)
+    ap.add_argument("--max_model_len", type=int, default=8192, help="31B는 GPU 메모리 때문에 4096 (프롬프트 약 2,300 + 출력 1,024 이하)")
     ap.add_argument("--model", default=MODEL, help="VLM 경로 (12단계: Gemma 4 31B, Qwen3-VL 8B)")
     args = ap.parse_args()
 
@@ -124,7 +125,7 @@ def main():
     gemma = "gemma" in args.model.lower()
     # 이미지 하나당 시각 토큰 수를 VLM끼리 맞춘다: Gemma는 max_soft_tokens, Qwen3-VL은 토큰 하나 = 32x32 픽셀
     mm = {"max_soft_tokens": args.soft_tokens} if gemma else {"max_pixels": args.soft_tokens * 32 * 32}
-    llm = LLM(args.model, max_model_len=8192, gpu_memory_utilization=0.92, limit_mm_per_prompt={"image": 3},
+    llm = LLM(args.model, max_model_len=args.max_model_len, gpu_memory_utilization=0.92, limit_mm_per_prompt={"image": 3},
               mm_processor_kwargs=mm, seed=0)
     chat_kw = {"enable_thinking": False} if gemma else None
     sp = SamplingParams(temperature=0.0, max_tokens=args.max_tokens, seed=0,
