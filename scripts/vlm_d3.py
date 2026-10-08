@@ -115,27 +115,32 @@ def main():
     ap.add_argument("--soft_tokens", type=int, default=560, help="이미지 하나당 시각 토큰 수 (70/140/280/560/1120)")
     ap.add_argument("--max_tokens", type=int, default=1024)
     ap.add_argument("--chunk", type=int, default=100)
+    ap.add_argument("--model", default=MODEL, help="VLM 경로 (12단계: Gemma 4 31B, Qwen3-VL 8B)")
     args = ap.parse_args()
 
     scenes = pd.read_parquet(args.scenes)
     if args.limit:
         scenes = scenes.head(args.limit)
-    llm = LLM(MODEL, max_model_len=8192, gpu_memory_utilization=0.90, limit_mm_per_prompt={"image": 3},
-              mm_processor_kwargs={"max_soft_tokens": args.soft_tokens}, seed=0)
+    gemma = "gemma" in args.model.lower()
+    # 이미지 하나당 시각 토큰 수를 VLM끼리 맞춘다: Gemma는 max_soft_tokens, Qwen3-VL은 토큰 하나 = 32x32 픽셀
+    mm = {"max_soft_tokens": args.soft_tokens} if gemma else {"max_pixels": args.soft_tokens * 32 * 32}
+    llm = LLM(args.model, max_model_len=8192, gpu_memory_utilization=0.92, limit_mm_per_prompt={"image": 3},
+              mm_processor_kwargs=mm, seed=0)
+    chat_kw = {"enable_thinking": False} if gemma else None
     sp = SamplingParams(temperature=0.0, max_tokens=args.max_tokens, seed=0,
                         structured_outputs=StructuredOutputsParams(json=SCHEMA))
     rows, t0 = [], time.time()
     for lo in range(0, len(scenes), args.chunk):
         part = scenes.iloc[lo: lo + args.chunk]
         msgs, texts = zip(*(build_messages(r) for r in part.itertuples()))
-        outs = llm.chat(list(msgs), sp, chat_template_kwargs={"enable_thinking": False}, use_tqdm=False)
+        outs = llm.chat(list(msgs), sp, chat_template_kwargs=chat_kw, use_tqdm=False)
         for r, text, o in zip(part.itertuples(), texts, outs):
             c = o.outputs[0]
             rows.append(dict(token=r.token, user_prompt=text, raw_output=c.text, finish_reason=c.finish_reason,
                              n_prompt_tokens=len(o.prompt_token_ids), n_output_tokens=len(c.token_ids)))
         print(f"{len(rows)}/{len(scenes)} scenes, {time.time() - t0:.0f}s", flush=True)
     df = pd.DataFrame(rows)
-    meta = dict(model=MODEL, soft_tokens=args.soft_tokens, temperature=0.0, max_tokens=args.max_tokens,
+    meta = dict(model=args.model, mm_processor_kwargs=mm, soft_tokens=args.soft_tokens, temperature=0.0, max_tokens=args.max_tokens,
                 system_prompt=SYSTEM, schema=SCHEMA)
     out = ROOT / f"exp/d3/{args.name}_raw.parquet"
     df.to_parquet(out, index=False)

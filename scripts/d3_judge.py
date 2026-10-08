@@ -91,10 +91,11 @@ def main():
     ap.add_argument("--name", default="d3")
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--workers", type=int, default=24)
+    ap.add_argument("--scenes", type=Path, default=EXP / "d3/scenes.parquet")
     args = ap.parse_args()
 
     raw = pd.read_parquet(EXP / f"d3/{args.name}_raw.parquet")
-    scenes = pd.read_parquet(EXP / "d3/scenes.parquet").set_index("token")
+    scenes = pd.read_parquet(args.scenes).set_index("token")
     human = pd.read_parquet(EXP / "l1/navtest_labels.parquet").drop_duplicates("token").set_index("token")
     parsed = [parse(r.raw_output, r.finish_reason) for r in raw.itertuples()]
     raw["parse_status"] = [p[0] for p in parsed]

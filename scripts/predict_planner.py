@@ -41,7 +41,7 @@ def set_table(name: str) -> pd.DataFrame:
         df = pd.read_parquet(ROOT / "exp/l3/train_bundle_train.parquet").sample(n=5000, random_state=0)
     else:
         df = pd.read_parquet(ROOT / f"data_lists/eval/{name}.parquet")
-        if name == "D3":
+        if name.startswith("D3"):  # D3와 12단계 확장 D3x_*
             df = df[df.parse_status == "ok"]
     return df.reset_index(drop=True)
 

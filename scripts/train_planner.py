@@ -5,6 +5,7 @@
   B2      결정 입력, 원래 결정만
   Bcomply 결정 입력, 원래 결정 + CF⁺
   Ours    결정 입력, 원래 결정 + CF⁺ + CF⁻, 판단 head
+  B3      결정 입력, 원래 결정 + CF⁺ + CF⁻, 판단 head 없음 (12단계)
 
 사용법
   python scripts/train_planner.py --model Bcomply --overfit_scenes 100 --steps 3000 --name step08_overfit_Bcomply
@@ -33,6 +34,7 @@ MODELS = {
     "B2": dict(use_decision=True, judge=False, sample_types=("original",)),
     "Bcomply": dict(use_decision=True, judge=False, sample_types=("original", "cf_pos")),
     "Ours": dict(use_decision=True, judge=True, sample_types=SAMPLE_TYPES),
+    "B3": dict(use_decision=True, judge=False, sample_types=SAMPLE_TYPES),  # Ours에서 판단 head만 뺀 것 (12단계)
 }
 
 

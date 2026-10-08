@@ -24,9 +24,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--exclude", type=Path, default=None, help="이 표의 장면은 빼고 고른다 (12단계 D3 확장)")
+    ap.add_argument("--out", type=Path, default=ROOT / "exp/d3/scenes.parquet")
     args = ap.parse_args()
 
     d0 = pd.read_parquet(ROOT / "data_lists/eval/D0.parquet")
+    if args.exclude:
+        d0 = d0[~d0.token.isin(set(pd.read_parquet(args.exclude, columns=["token"]).token))]
     pick = d0.sample(n=args.n, random_state=args.seed).sort_values("token")
     loader = scene_loader("navtest", log_names=pick.log_name.unique(), tokens=pick.token)
     rows = []
@@ -44,7 +48,7 @@ def main():
             ax=float(ego.ego_acceleration[0]), command=COMMANDS[int(np.argmax(ego.driving_command))]))
     df = pd.DataFrame(rows)
     assert all(Path(p).exists() for c in ("l0", "f0", "r0") for p in df[f"cam_{c}"])
-    out = ROOT / "exp/d3/scenes.parquet"
+    out = args.out
     out.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(out, index=False)
     print(f"{len(df)} scenes in {df.log_name.nunique()} logs -> {out}")
