@@ -165,11 +165,12 @@ class Planner(nn.Module):
             mem = torch.cat([mem, self.dec_in(dec)], 1)
         return mem
 
-    def denoise(self, z_t, t, mem) -> torch.Tensor:
-        """노이즈 섞인 정규화 경로 z_t (B, 8, 3), 시간 t (B,) → 예측한 깨끗한 정규화 경로 (B, 8, 3)."""
+    def denoise(self, z_t, t, mem, return_hidden: bool = False):
+        """노이즈 섞인 정규화 경로 z_t (B, 8, 3), 시간 t (B,) → 예측한 깨끗한 정규화 경로 (B, 8, 3).
+        return_hidden이면 (경로, 디코더 마지막 층의 waypoint 은닉 상태 (B, 8, D))를 낸다 (12단계 probe)."""
         temb = self.time_mlp(timestep_embedding(t, self.cfg.d_model))[:, None]
-        h = self.pose_in(z_t) + self.pose_pos + temb
-        return self.pose_out(self.traj_dec(h, mem))
+        h = self.traj_dec(self.pose_in(z_t) + self.pose_pos + temb, mem)
+        return (self.pose_out(h), h) if return_hidden else self.pose_out(h)
 
     def judge_out(self, mem) -> Dict[str, torch.Tensor]:
         h = self.judge_dec(self.judge_query.expand(mem.shape[0], -1, -1), mem)[:, 0]
@@ -203,15 +204,19 @@ class Planner(nn.Module):
     @torch.no_grad()
     def sample(self, keyval, query_out, dec=None, n_steps: int = 10, generator=None,
                z0: Optional[torch.Tensor] = None, bev: Optional[torch.Tensor] = None,
-               obj: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
-        """z0: 시작 노이즈 (B, 8, 3). 주지 않으면 generator로 뽑는다."""
+               obj: Optional[torch.Tensor] = None, return_hidden: bool = False) -> Dict[str, torch.Tensor]:
+        """z0: 시작 노이즈 (B, 8, 3). 주지 않으면 generator로 뽑는다. return_hidden이면 마지막 단계의 waypoint
+        은닉 상태(out["hidden"], (B, 8, D))도 낸다."""
         mem = self.memory(keyval, query_out, dec, bev, obj)
         B = mem.shape[0]
         z = z0 if z0 is not None else torch.randn(B, N_POSES, POSE_DIM, device=mem.device, generator=generator)
         ts = torch.linspace(self.cfg.T - 1, 0, n_steps, device=mem.device).round().long()
         for i, t in enumerate(ts):
             tt = t.expand(B)
-            out = self.denoise(z, tt, mem)
+            last = i == len(ts) - 1
+            out = self.denoise(z, tt, mem, return_hidden=return_hidden and last)
+            if return_hidden and last:
+                out, hidden = out
             ac = self.alphas_cumprod[t]
             x0 = out if self.cfg.pred == "x0" else ac.sqrt() * z - (1 - ac).sqrt() * out
             if i == len(ts) - 1:
@@ -221,6 +226,8 @@ class Planner(nn.Module):
             eps = (z - ac.sqrt() * x0) / (1 - ac).sqrt()
             z = ac_next.sqrt() * x0 + (1 - ac_next).sqrt() * eps  # DDIM, eta = 0
         out = {"poses": self.denormalize(z)}
+        if return_hidden:
+            out["hidden"] = hidden
         if self.cfg.judge:
             out.update(self.judge_out(mem))
         return out
