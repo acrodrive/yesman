@@ -3,6 +3,8 @@
 그림: 왼쪽 CAM_F0, 오른쪽 BEV. 회색 점선 = 다른 물체의 4초 움직임, 주황 굵은 선 = 대표 후보(불가능: 떨어진 후보 중 최고,
 가능: 목표 경로), 검은 점선 = 사람의 실제 경로. 제목: CF 이름, 결정, 판정, 불가능 기준, 판단 근거, 시야.
 
+실제 VLM 결정 표(D3x)이면 사람 결정과 VLM이 꼽은 핵심 요인도 제목에 쓴다.
+
 사용법: python scripts/viz_l3.py --table data_lists/eval/D2.parquet --query "category == 'road'" --n 10 --out exp/step06/road
 """
 
@@ -60,8 +62,12 @@ def draw(scene, row, out_dir: Path, tag: str, rng: float = 40.0) -> Path:
                       if k in row and isinstance(row[k], str) and row[k])
     fails = "  ".join(f"{k[5:]} {row[k]:.0%}" for k in ("fail_collision", "fail_off_road", "fail_wrong_way")
                       if k in row and pd.notna(row[k]))
-    fig.suptitle(f"{tag}{row['token']} [{row['cf_name']}]  decision: {row['decision']}\n{extra}  |  fail rate: {fails}",
-                 fontsize=10, family="monospace")
+    title = f"{tag}{row['token']} [{row['cf_name']}]  decision: {row['decision']}\n{extra}  |  fail rate: {fails}"
+    if row.get("human_decision"):
+        title += f"\nhuman: {row['human_decision']}  (v0 {np.linalg.norm(frame.ego_status.ego_velocity[:2]):.1f} m/s)"
+    if row.get("key_issue"):
+        title += f"\nVLM key issue: {row['key_issue'][:150]}"
+    fig.suptitle(title, fontsize=10, family="monospace")
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{tag}{row['token']}_{row['cf_name']}.png"
     fig.savefig(path, dpi=70)
