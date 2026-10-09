@@ -14,18 +14,24 @@ import pandas as pd
 import torch
 
 from yesman.decision import LAT_ACTIONS, LON_ACTIONS
-from yesman.model import N_SEG, REASONS, encode_decisions
+from yesman.model import N_SEG, REASONS, encode_decisions, obj_features
 
 ROOT = Path(os.environ["YESMAN_ROOT"])
 FEAT = ROOT / "exp/features/ltf"
 SAMPLE_TYPES = ("original", "cf_pos", "cf_neg")
 
 
-def load_features(split: str, device="cuda", bev_sem: bool = False) -> Dict[str, object]:
+def load_features(split: str, device="cuda", bev_sem: bool = False, obj: str = "") -> Dict[str, object]:
+    """obj (12단계 B): ltf / gt / gtvel이면 물체 토큰 입력 feats["obj"] (N, 30, OBJ_DIM)을 더한다."""
     tokens = FEAT.joinpath(split, "tokens.txt").read_text().split()
     out = {"tokens": tokens, "row": {t: i for i, t in enumerate(tokens)}}
     for k in ("keyval", "query_out") + (("bev_sem",) if bev_sem else ()):
         out[k] = torch.from_numpy(np.load(FEAT / split / f"{k}.npy")).to(device)
+    if obj:
+        ld = lambda k: torch.from_numpy(np.load(FEAT / split / f"{k}.npy"))  # noqa: E731
+        o = (obj_features("ltf", ld("agent_states"), ld("agent_logits")) if obj == "ltf"
+             else obj_features(obj, gt=ld("obj_gt")))
+        out["obj"] = o.half().to(device)
     return out
 
 

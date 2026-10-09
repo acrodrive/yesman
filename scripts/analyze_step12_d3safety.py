@@ -26,6 +26,8 @@ if "--synth" in sys.argv:  # 12단계 (3): CF⁺ 목표를 합성으로 바꾼 �
     RUNS = {"B1": "B1", "B2": "B2", "B-순응": "Bcomply_syn", "B3": "B3_syn", "Ours": "Ours_syn"}
 if "--variants" in sys.argv:  # 12단계 A: 넓힌 CF(W), 실제 VLM 결정(V), 둘 다(WV)로 학습한 Ours
     RUNS = {"B-순응": "Bcomply_syn", "Ours": "Ours_syn", "Ours+W": "Ours_W", "Ours+V": "Ours_V", "Ours+WV": "Ours_WV"}
+if "--obj" in sys.argv:  # 12단계 B (진단): 물체 토큰을 더한 Ours (LTF 검출 / 정답 위치 / 정답 위치 + 속도)
+    RUNS = {"Ours": "Ours_syn", "Ours+LTF 검출": "Ours_objltf", "Ours+GT 위치": "Ours_objgt", "Ours+GT 위치·속도": "Ours_objgtvel"}
 VLMS = {"Gemma 4 12B": "gemma12b", "Gemma 4 31B": "gemma31b", "Qwen3-VL 8B": "qwen8b"}
 SAFE = ["no_at_fault_collisions", "drivable_area_compliance", "driving_direction_compliance"]
 
@@ -71,7 +73,8 @@ def main():
             L.append(f"| {m} | {x['safe'][0]:.1%} [{x['safe'][1]:.1%}, {x['safe'][2]:.1%}] | {x['executed']:.1%} | "
                      f"{x['rejected']:.1%} | " + ", ".join(f"{k} {vv:.0%}" for k, vv in x["safe_by_cat"].items()) + " |")
         L.append("")
-    tag = "_variants" if "--variants" in sys.argv else "_synth" if "--synth" in sys.argv else ""
+    tag = ("_variants" if "--variants" in sys.argv else "_synth" if "--synth" in sys.argv else
+           "_obj" if "--obj" in sys.argv else "")
     json.dump(out, open(ROOT / f"exp/step12/d3x_infeasible_safety{tag}.json", "w"), indent=1, ensure_ascii=False, default=float)
     (ROOT / f"logs/step12/d3x_safety{tag}.md").write_text("\n".join(L) + "\n")
     print("\n".join(L))

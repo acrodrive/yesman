@@ -28,6 +28,7 @@ N_POSES, POSE_DIM, N_SEG = 8, 3, 2
 DEC_IN = len(LON_ACTIONS) + len(LAT_ACTIONS) + 2 + N_SEG  # 13
 REASONS = ("collision", "off_road", "wrong_way")
 BEV_CLASSES, BEV_PATCH = 7, 16  # LTF BEV 지도 분할의 범주 수(배경 포함), 조각 크기 [픽셀]
+OBJ_DIM = {"ltf": 7, "gt": 7, "gtvel": 9}  # x/32, y/32, cos, sin, 길이/5, 너비/5, 있음(LTF는 확률) [+ vx/10, vy/10]
 
 
 @dataclass
@@ -46,9 +47,23 @@ class ModelConfig:
     use_bev_sem: bool = False  # 장면 토큰에 LTF가 예측한 BEV 지도 분할(128x256, 7범주)의 16x16 조각 토큰 128개를 더한다
     pred: str = "x0"  # 디코더가 예측하는 것: x0 (깨끗한 경로) / v (v = sqrt(ac)·eps − sqrt(1−ac)·x0, 10단계 시험)
     loss: str = "l1"  # 경로 손실: l1 / mse
+    obj: str = ""  # 12단계 B (진단): 물체 토큰 30개를 장면 토큰에 더한다. ltf = LTF 검출 결과, gt = 정답 위치, gtvel = 정답 위치 + 속도
 
     def to_dict(self):
         return asdict(self)
+
+
+def obj_features(kind: str, agent_states=None, agent_logits=None, gt=None) -> torch.Tensor:
+    """물체 토큰 입력 (B, 30, OBJ_DIM[kind]). ltf: 7단계에 저장한 LTF 검출 결과(agent_states (B,30,5), agent_logits (B,30)).
+    gt / gtvel: scripts/gt_objects.py의 obj_gt (B,30,8: x y heading l w vx vy valid). 빈 자리는 0."""
+    if kind == "ltf":
+        s, p = agent_states.float(), torch.sigmoid(agent_logits.float())[..., None]
+    else:
+        s, p = gt[..., :5].float(), gt[..., 7:8].float()
+    f = [s[..., :2] / 32, torch.cos(s[..., 2:3]), torch.sin(s[..., 2:3]), s[..., 3:5] / 5, p]
+    if kind == "gtvel":
+        f.append(gt[..., 5:7].float() / 10)
+    return torch.cat(f, -1) * (p > 0 if kind != "ltf" else torch.ones_like(p))
 
 
 def encode_decisions(lon, lon_s, lat, lat_s) -> torch.Tensor:
@@ -95,6 +110,9 @@ class Planner(nn.Module):
         if cfg.use_bev_sem:  # 조각 하나 = 16x16 픽셀(4 m x 4 m)의 범주 one-hot을 펼친 것
             self.bev_in = nn.Sequential(nn.Linear(BEV_CLASSES * BEV_PATCH * BEV_PATCH, D), nn.LayerNorm(D))
             self.bev_pos = nn.Parameter(torch.zeros(1, (128 // BEV_PATCH) * (256 // BEV_PATCH), D))
+        if cfg.obj:  # 물체 하나 = 토큰 하나. 위치는 값 안에 있으므로 위치 임베딩 대신 종류 임베딩 하나만 둔다
+            self.obj_in = nn.Sequential(nn.Linear(OBJ_DIM[cfg.obj], D), nn.GELU(), nn.Linear(D, D), nn.LayerNorm(D))
+            self.obj_type = nn.Parameter(torch.zeros(1, 1, D))
         # M2 결정 인코더
         if cfg.use_decision:
             self.dec_in = nn.Sequential(nn.Linear(DEC_IN, D), nn.GELU(), nn.Linear(D, D), nn.LayerNorm(D))
@@ -110,7 +128,8 @@ class Planner(nn.Module):
             self.judge_dec = _decoder(cfg, cfg.n_judge_layers)
             self.flag_head = nn.Linear(D, 1)
             self.reason_head = nn.Linear(D, len(REASONS))
-        for p in (self.scene_pos, self.pose_pos) + ((self.bev_pos,) if cfg.use_bev_sem else ()):
+        for p in (self.scene_pos, self.pose_pos) + ((self.bev_pos,) if cfg.use_bev_sem else ()) + \
+                ((self.obj_type,) if cfg.obj else ()):
             nn.init.normal_(p, std=0.02)
         if cfg.judge:
             nn.init.normal_(self.judge_query, std=0.02)
@@ -131,12 +150,16 @@ class Planner(nn.Module):
         x = x.permute(0, 1, 3, 2, 4, 5).reshape(B, (H // BEV_PATCH) * (W // BEV_PATCH), -1)
         return self.bev_in(x) + self.bev_pos
 
-    def memory(self, keyval, query_out, dec: Optional[torch.Tensor], bev: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def memory(self, keyval, query_out, dec: Optional[torch.Tensor], bev: Optional[torch.Tensor] = None,
+               obj: Optional[torch.Tensor] = None) -> torch.Tensor:
         feats = [keyval.float()] + ([query_out.float()] if self.cfg.use_query_out else [])
         mem = self.scene_in(torch.cat(feats, 1)) + self.scene_pos
         if self.cfg.use_bev_sem:
             assert bev is not None, "BEV 지도 분할 입력이 필요한 모델이다"
             mem = torch.cat([mem, self.bev_tokens(bev)], 1)
+        if self.cfg.obj:
+            assert obj is not None, "물체 토큰 입력이 필요한 모델이다"
+            mem = torch.cat([mem, self.obj_in(obj.float()) + self.obj_type], 1)
         if self.cfg.use_decision:
             assert dec is not None, "결정 입력이 필요한 모델이다"
             mem = torch.cat([mem, self.dec_in(dec)], 1)
@@ -153,8 +176,9 @@ class Planner(nn.Module):
         return {"flag_logit": self.flag_head(h)[:, 0], "reason_logit": self.reason_head(h)}
 
     # ---- 학습 ----
-    def loss(self, keyval, query_out, dec, target_poses, flag=None, reason=None, traj_weight=None, bev=None) -> Dict:
-        mem = self.memory(keyval, query_out, dec, bev)
+    def loss(self, keyval, query_out, dec, target_poses, flag=None, reason=None, traj_weight=None, bev=None,
+             obj=None) -> Dict:
+        mem = self.memory(keyval, query_out, dec, bev, obj)
         x0 = self.normalize(target_poses)
         B = x0.shape[0]
         t = torch.randint(0, self.cfg.T, (B,), device=x0.device)
@@ -178,9 +202,10 @@ class Planner(nn.Module):
     # ---- 샘플링 ----
     @torch.no_grad()
     def sample(self, keyval, query_out, dec=None, n_steps: int = 10, generator=None,
-               z0: Optional[torch.Tensor] = None, bev: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+               z0: Optional[torch.Tensor] = None, bev: Optional[torch.Tensor] = None,
+               obj: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
         """z0: 시작 노이즈 (B, 8, 3). 주지 않으면 generator로 뽑는다."""
-        mem = self.memory(keyval, query_out, dec, bev)
+        mem = self.memory(keyval, query_out, dec, bev, obj)
         B = mem.shape[0]
         z = z0 if z0 is not None else torch.randn(B, N_POSES, POSE_DIM, device=mem.device, generator=generator)
         ts = torch.linspace(self.cfg.T - 1, 0, n_steps, device=mem.device).round().long()

@@ -40,7 +40,8 @@ MODELS = {
 
 def batch_inputs(feats, s, idx):
     r = s.feat_row[idx]
-    return feats["keyval"][r], feats["query_out"][r], s.dec[idx], (feats["bev_sem"][r] if "bev_sem" in feats else None)
+    return (feats["keyval"][r], feats["query_out"][r], s.dec[idx], (feats["bev_sem"][r] if "bev_sem" in feats else None),
+            (feats["obj"][r] if "obj" in feats else None))
 
 
 @torch.no_grad()
@@ -53,8 +54,8 @@ def evaluate(model, feats, s, seeds=(0, 1, 2), n_steps=10, bs=1024):
         out = []
         for lo in range(0, len(s), bs):
             idx = torch.arange(lo, min(len(s), lo + bs), device="cuda")
-            kv, qo, dec, bev = batch_inputs(feats, s, idx)
-            o = model.sample(kv, qo, dec if model.cfg.use_decision else None, n_steps, g, bev=bev)
+            kv, qo, dec, bev, obj = batch_inputs(feats, s, idx)
+            o = model.sample(kv, qo, dec if model.cfg.use_decision else None, n_steps, g, bev=bev, obj=obj)
             out.append(o["poses"])
             if seed == seeds[0] and model.cfg.judge:
                 flags.append(o["flag_logit"])
@@ -113,6 +114,8 @@ def main():
     ap.add_argument("--w_reason", type=float, default=1.0)
     ap.add_argument("--bundle_suffix", default="", help="학습 묶음 파일 이름 뒤에 붙인다 (예: _retarget, 10단계 시험)")
     ap.add_argument("--bev_sem", action="store_true", help="LTF BEV 지도 분할 조각 토큰을 장면 토큰에 더한다 (10단계 시험)")
+    ap.add_argument("--obj", choices=["", "ltf", "gt", "gtvel"], default="",
+                    help="물체 토큰 30개를 더한다 (12단계 B 진단): LTF 검출 결과 / 정답 위치 / 정답 위치 + 속도")
     ap.add_argument("--pred", choices=["x0", "v"], default="x0")
     ap.add_argument("--loss", choices=["l1", "mse"], default="l1")
     ap.add_argument("--keep_unseen", action="store_true", help="보이지 않는 원인 CF⁻도 학습에 쓴다 (기본: 뺀다, 10단계 결정)")
@@ -123,7 +126,7 @@ def main():
     out_dir = ROOT / "exp/train" / args.name
     out_dir.mkdir(parents=True, exist_ok=True)
     spec = MODELS[args.model]
-    feats = load_features("navtrain", bev_sem=args.bev_sem)
+    feats = load_features("navtrain", bev_sem=args.bev_sem, obj=args.obj)
     train = load_bundle("train" + args.bundle_suffix, feats, spec["sample_types"])
     if args.overfit_scenes:
         rng = np.random.default_rng(args.seed)
@@ -147,7 +150,8 @@ def main():
           f"({train.df.sample_type.value_counts().to_dict()}), val {len(val):,}", flush=True)
 
     cfg = ModelConfig(use_decision=spec["use_decision"], judge=spec["judge"], n_layers=args.n_layers,
-                      use_query_out=not args.no_query_out, pred=args.pred, loss=args.loss, use_bev_sem=args.bev_sem)
+                      use_query_out=not args.no_query_out, pred=args.pred, loss=args.loss, use_bev_sem=args.bev_sem,
+                      obj=args.obj)
     mean, std = pose_stats(train)
     model = Planner(cfg, mean, std).cuda()
     n_params = sum(p.numel() for p in model.parameters())
@@ -159,8 +163,8 @@ def main():
     t0, run = time.time(), {}
     for step in range(1, args.steps + 1):
         idx = torch.multinomial(weights, args.batch, replacement=True)
-        kv, qo, dec, bev = batch_inputs(feats, train, idx)
-        losses = model.loss(kv, qo, dec, train.target[idx], train.flag[idx], train.reason[idx], bev=bev)
+        kv, qo, dec, bev, obj = batch_inputs(feats, train, idx)
+        losses = model.loss(kv, qo, dec, train.target[idx], train.flag[idx], train.reason[idx], bev=bev, obj=obj)
         loss = losses["traj"] + args.w_flag * losses.get("flag", 0) + args.w_reason * losses.get("reason", 0)
         opt.zero_grad(set_to_none=True)
         loss.backward()
