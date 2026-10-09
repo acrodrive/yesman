@@ -33,6 +33,7 @@ import l3_run  # noqa: E402
 
 ROOT = Path(os.environ["YESMAN_ROOT"])
 EXP = Path(os.environ["NAVSIM_EXP_ROOT"])
+SPLIT, CACHE = "navtest", "navtest"  # 12단계 A: navtrain 장면의 VLM 결정도 판정한다 (--split navtrain --cache navtrain_sensor)
 
 
 def parse(raw: str, finish_reason: str):
@@ -58,8 +59,8 @@ def parse(raw: str, finish_reason: str):
 
 def judge_log(args):
     log, rows = args
-    mcl = MetricCacheLoader(EXP / "metric_cache/navtest")
-    loader = scene_loader("navtest", [log], [r["token"] for r in rows])
+    mcl = MetricCacheLoader(EXP / f"metric_cache/{CACHE}")
+    loader = scene_loader(SPLIT, [log], [r["token"] for r in rows])
     out = []
     for r in rows:
         d0 = row_to_decision(r["human"])
@@ -92,11 +93,15 @@ def main():
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--workers", type=int, default=24)
     ap.add_argument("--scenes", type=Path, default=EXP / "d3/scenes.parquet")
+    ap.add_argument("--split", default="navtest")
+    ap.add_argument("--cache", default=None)
     args = ap.parse_args()
+    global SPLIT, CACHE
+    SPLIT, CACHE = args.split, args.cache or args.split
 
     raw = pd.read_parquet(EXP / f"d3/{args.name}_raw.parquet")
     scenes = pd.read_parquet(args.scenes).set_index("token")
-    human = pd.read_parquet(EXP / "l1/navtest_labels.parquet").drop_duplicates("token").set_index("token")
+    human = pd.read_parquet(EXP / f"l1/{SPLIT}_labels.parquet").drop_duplicates("token").set_index("token")
     parsed = [parse(r.raw_output, r.finish_reason) for r in raw.itertuples()]
     raw["parse_status"] = [p[0] for p in parsed]
     raw["scene_description"] = [p[1] for p in parsed]

@@ -27,7 +27,7 @@ from navsim.common.dataloader import MetricCacheLoader
 from yesman.data import scene_loader
 from yesman.decision import Decision
 from yesman.l2 import L2, L2Config, PathBank, row_to_decision
-from yesman.l3 import categorize, cf_menu, change_type, collision_cause_visibility, weaker
+from yesman.l3 import categorize, cf_menu, cf_menu_wide, change_type, collision_cause_visibility, weaker
 
 EXP = Path(os.environ["NAVSIM_EXP_ROOT"])
 TURN_CFS = ("turn_L", "turn_R", "turn_late_L", "turn_late_R")
@@ -61,7 +61,7 @@ def _row(token, log, name, d: Decision, res, d0: Decision):
 
 
 def run_log(args):
-    split, cache, log, rows, n_cf, skip_original, only_turn = args
+    split, cache, log, rows, n_cf, skip_original, only_turn, wide = args
     mcl = MetricCacheLoader(EXP / f"metric_cache/{cache}")
     loader = scene_loader(split, [log], [r["token"] for r in rows])
     out = []
@@ -71,9 +71,12 @@ def run_log(args):
             scene = loader.get_scene_from_token(r["token"])
             ctx = _L2.context(scene, mcl.get_from_token(r["token"]))
             d0 = row_to_decision(r)
-            menu = cf_menu(d0, ctx.v0)
+            if wide:  # 12단계 A: 넓힌 메뉴 (장면마다 4개, 시드 = token)
+                menu = cf_menu_wide(d0, ctx.v0, np.random.default_rng(zlib.crc32(f"{r['token']}:wide".encode())))
+            else:
+                menu = cf_menu(d0, ctx.v0)
             names = sorted(menu)
-            if n_cf and len(names) > n_cf:
+            if n_cf and len(names) > n_cf and not wide:
                 rng = np.random.default_rng(zlib.crc32(f"{r['token']}:menu".encode()))
                 names = sorted(rng.choice(names, size=n_cf, replace=False))
             decs = {"original": d0, **{k: menu[k] for k in names}}
@@ -115,6 +118,7 @@ def main():
     ap.add_argument("--n_cf", type=int, default=0, help="장면마다 CF를 이만큼 무작위로 고른다 (0: 메뉴 전부)")
     ap.add_argument("--skip_original", action="store_true", help="원래 결정은 L2로 판정하지 않는다 (학습 장면)")
     ap.add_argument("--only_turn", action="store_true", help="회전 CF와 회전이 있는 원래 결정만 다시 판정한다")
+    ap.add_argument("--wide", action="store_true", help="12단계 A: 넓힌 CF 메뉴(yesman/l3.py cf_menu_wide)")
     ap.add_argument("--merge_into", type=Path, default=None, help="이 표의 같은 (token, cf_name) 행을 새 결과로 바꿔 저장한다")
     ap.add_argument("--max_scenes", type=int, default=None)
     ap.add_argument("--workers", type=int, default=16)
@@ -132,7 +136,7 @@ def main():
         lab = lab.sample(n=min(args.max_scenes, len(lab)), random_state=0)
     print(f"{args.split}: {len(lab):,} usable scenes in {lab.log_name.nunique()} logs", flush=True)
     tasks = [(args.split, args.cache or args.split, log, g.to_dict("records"), args.n_cf, args.skip_original,
-              args.only_turn)
+              args.only_turn, args.wide)
              for log, g in lab.groupby("log_name")]
     tasks.sort(key=lambda t: -len(t[3]))  # 큰 로그부터 (병렬 끝부분의 빈 시간을 줄인다)
     t0, rows = time.time(), []

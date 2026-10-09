@@ -26,13 +26,19 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--exclude", type=Path, default=None, help="이 표의 장면은 빼고 고른다 (12단계 D3 확장)")
     ap.add_argument("--out", type=Path, default=ROOT / "exp/d3/scenes.parquet")
+    ap.add_argument("--split", default="navtest", help="navtrain: 학습 묶음의 모든 장면 (12단계 A, 실제 VLM 결정으로 CF 만들기)")
     args = ap.parse_args()
 
-    d0 = pd.read_parquet(ROOT / "data_lists/eval/D0.parquet")
-    if args.exclude:
-        d0 = d0[~d0.token.isin(set(pd.read_parquet(args.exclude, columns=["token"]).token))]
-    pick = d0.sample(n=args.n, random_state=args.seed).sort_values("token")
-    loader = scene_loader("navtest", log_names=pick.log_name.unique(), tokens=pick.token)
+    if args.split == "navtrain":
+        pick = pd.concat([pd.read_parquet(ROOT / f"exp/l3/train_bundle_{b}.parquet", columns=["token", "log_name", "sample_type"])
+                          for b in ("train", "val")])
+        pick = pick[pick.sample_type == "original"].drop_duplicates("token").sort_values("token")
+    else:
+        d0 = pd.read_parquet(ROOT / "data_lists/eval/D0.parquet")
+        if args.exclude:
+            d0 = d0[~d0.token.isin(set(pd.read_parquet(args.exclude, columns=["token"]).token))]
+        pick = d0.sample(n=args.n, random_state=args.seed).sort_values("token")
+    loader = scene_loader(args.split, log_names=pick.log_name.unique(), tokens=pick.token)
     rows = []
     for r in pick.itertuples():
         frames = loader.scene_frames_dicts[r.token]
@@ -42,7 +48,8 @@ def main():
         ego = loader.get_agent_input_from_token(r.token).ego_statuses[-1]
         rows.append(dict(
             token=r.token, log_name=r.log_name,
-            **{f"cam_{c}": str(DATA_ROOT / "sensor_blobs/test" / cur["cams"][f"CAM_{c.upper()}"]["data_path"])
+            **{f"cam_{c}": str(DATA_ROOT / "sensor_blobs" / ("trainval" if args.split == "navtrain" else "test")
+                               / cur["cams"][f"CAM_{c.upper()}"]["data_path"])
                for c in ("l0", "f0", "r0")},
             speed=float(np.linalg.norm(ego.ego_velocity)), vx=float(ego.ego_velocity[0]),
             ax=float(ego.ego_acceleration[0]), command=COMMANDS[int(np.argmax(ego.driving_command))]))

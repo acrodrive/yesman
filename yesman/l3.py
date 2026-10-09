@@ -69,6 +69,33 @@ def cf_menu(d0: Decision, v0: float) -> Dict[str, Decision]:
     return {k: v for k, v in out.items() if not same_decision(d0, v, allow_neighbor=False)}
 
 
+def cf_menu_wide(d0: Decision, v0: float, rng: np.random.Generator) -> Dict[str, Decision]:
+    """12단계 A: 넓힌 CF 메뉴 (결과를 보기 전에 정함). 실제 VLM의 틀린 결정은 앞뒤와 좌우를 동시에 바꾸거나 메뉴에 없는
+    세기를 쓴다(12단계 분석). 장면마다 4개: 동시 변경 2개, 좌우 세기 무작위 1개, 속도 무작위 1개.
+    - 동시 변경: cf_menu의 좌우 CF 하나 + 앞뒤 CF(faster / slower / stop) 하나를 함께 적용한다.
+    - 좌우 세기 무작위: cf_menu의 좌우 CF 하나의 좌우 세기를 U(0.2, 1.0)으로 바꾼다.
+    - 속도 무작위: 구간마다 go 세기를 U(0.05, 1.0)으로 바꾼다(좌우는 원래대로).
+    원래 결정과 같은 것(이웃 라벨 허용 없이)은 뺀다."""
+    base = cf_menu(d0, v0)
+    lat_names = [k for k in base if k in ("keep", "offset_L", "offset_R", "lc_L", "lc_R", "turn_L", "turn_R",
+                                          "turn_late_L", "turn_late_R")]
+    lon_names = [k for k in base if k in ("faster", "slower", "stop")]
+    out = {}
+    for j in range(2):
+        if not (lat_names and lon_names):
+            break
+        a, b = base[rng.choice(lat_names)], base[rng.choice(lon_names)]
+        segs = [_seg(sa, lon=sb.lon, lon_strength=sb.lon_strength) for sa, sb in zip(a.segments, b.segments)]
+        out[f"combo{j}"] = Decision(segs)
+    if lat_names:
+        a = base[rng.choice(lat_names)]
+        segs = [_seg(sa, lat_strength=float(rng.uniform(0.2, 1.0))) if sa.lat != "keep_lane" else _seg(sa)
+                for sa in a.segments]
+        out["latstr"] = Decision(segs)
+    out["lonrand"] = Decision([_seg(s, lon="go", lon_strength=float(rng.uniform(0.05, 1.0))) for s in d0.segments])
+    return {k: v for k, v in out.items() if not same_decision(d0, v, allow_neighbor=False)}
+
+
 def change_type(d0: Decision, d: Decision) -> str:
     """원래 결정과 무엇이 다른가: lat_type / lon_type / strength, 그리고 바뀐 구간 수."""
     kinds, segs = set(), 0

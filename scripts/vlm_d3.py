@@ -122,6 +122,11 @@ def main():
     scenes = pd.read_parquet(args.scenes)
     if args.limit:
         scenes = scenes.head(args.limit)
+    out = ROOT / f"exp/d3/{args.name}_raw.parquet"
+    done = pd.read_parquet(out) if out.exists() else None  # 이어 하기: 이미 한 장면은 건너뛴다
+    if done is not None:
+        scenes = scenes[~scenes.token.isin(set(done.token))]
+        print(f"resume: {len(done)} done, {len(scenes)} left", flush=True)
     gemma = "gemma" in args.model.lower()
     # 이미지 하나당 시각 토큰 수를 VLM끼리 맞춘다: Gemma는 max_soft_tokens, Qwen3-VL은 토큰 하나 = 32x32 픽셀
     mm = {"max_soft_tokens": args.soft_tokens} if gemma else {"max_pixels": args.soft_tokens * 32 * 32}
@@ -130,7 +135,7 @@ def main():
     chat_kw = {"enable_thinking": False} if gemma else None
     sp = SamplingParams(temperature=0.0, max_tokens=args.max_tokens, seed=0,
                         structured_outputs=StructuredOutputsParams(json=SCHEMA))
-    rows, t0 = [], time.time()
+    rows, t0 = ([] if done is None else done.to_dict("records")), time.time()
     for lo in range(0, len(scenes), args.chunk):
         part = scenes.iloc[lo: lo + args.chunk]
         msgs, texts = zip(*(build_messages(r) for r in part.itertuples()))
@@ -139,11 +144,12 @@ def main():
             c = o.outputs[0]
             rows.append(dict(token=r.token, user_prompt=text, raw_output=c.text, finish_reason=c.finish_reason,
                              n_prompt_tokens=len(o.prompt_token_ids), n_output_tokens=len(c.token_ids)))
-        print(f"{len(rows)}/{len(scenes)} scenes, {time.time() - t0:.0f}s", flush=True)
+        print(f"{len(rows)} scenes done, {time.time() - t0:.0f}s", flush=True)
+        if (lo // args.chunk) % 10 == 9:  # 1,000장면마다 중간 저장
+            pd.DataFrame(rows).to_parquet(out, index=False)
     df = pd.DataFrame(rows)
     meta = dict(model=args.model, mm_processor_kwargs=mm, soft_tokens=args.soft_tokens, temperature=0.0, max_tokens=args.max_tokens,
                 system_prompt=SYSTEM, schema=SCHEMA)
-    out = ROOT / f"exp/d3/{args.name}_raw.parquet"
     df.to_parquet(out, index=False)
     (ROOT / f"exp/d3/{args.name}_meta.json").write_text(json.dumps(meta, indent=1, ensure_ascii=False))
     print(f"saved {out} ({time.time() - t0:.0f}s); finish_reason {df.finish_reason.value_counts().to_dict()}")

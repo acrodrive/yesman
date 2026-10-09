@@ -81,12 +81,16 @@ def main():
     ap.add_argument("--bundle", choices=["train", "val"], required=True)
     ap.add_argument("--workers", type=int, default=28)
     ap.add_argument("--max_logs", type=int, default=0, help="시험용: 작은 로그 N개만 (저장하지 않는다)")
+    ap.add_argument("--input", type=Path, default=None, help="12단계 A: 이 묶음의 target_rule == new_l2best인 CF⁺만 합성한다")
+    ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
-    df = pd.read_parquet(EXP / f"l3/train_bundle_{args.bundle}_retarget.parquet")
+    df = pd.read_parquet(args.input or EXP / f"l3/train_bundle_{args.bundle}_retarget.parquet")
     df["i"] = np.arange(len(df))
     cols = ["i", "token", "cf_name"] + [c for c in df.columns if c.startswith("d_seg")]
     orig = {r["token"]: r for r in df[df.sample_type == "original"][cols].to_dict("records")}
     pos = df[df.sample_type == "cf_pos"]
+    if args.input:
+        pos = pos[pos.target_rule == "new_l2best"]
     tasks = sorted(((log, g.sort_values("token")[cols].to_dict("records"), {t: orig[t] for t in g.token.unique()})
                     for log, g in pos.groupby("log_name")), key=lambda t: -len(t[1]))
     if args.max_logs:
@@ -106,13 +110,14 @@ def main():
     print("synth rate by CF:", by.to_dict())
     if args.max_logs:
         return
-    df["target_rule"] = df.target_rule.where(df.sample_type != "cf_pos", "")
+    if not args.input:
+        df["target_rule"] = df.target_rule.where(df.sample_type != "cf_pos", "")
     df.loc[res.index, "target_rule"] = res.rule
     new = df.target_poses.copy()
     for i, p in res.poses.dropna().items():
         new.at[i] = p.ravel().tolist()
     df["target_poses"] = new
-    out = EXP / f"l3/train_bundle_{args.bundle}_synth.parquet"
+    out = args.out or EXP / f"l3/train_bundle_{args.bundle}_synth.parquet"
     df.drop(columns="i").to_parquet(out, index=False)
     print(f"saved {out} ({time.time() - t0:.0f}s)")
 
