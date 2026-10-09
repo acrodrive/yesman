@@ -118,6 +118,8 @@ def main():
                     help="물체 토큰 30개를 더한다 (12단계 B 진단): LTF 검출 결과 / 정답 위치 / 정답 위치 + 속도")
     ap.add_argument("--pred", choices=["x0", "v"], default="x0")
     ap.add_argument("--loss", choices=["l1", "mse"], default="l1")
+    ap.add_argument("--balance_strength", action="store_true",
+                    help="CF⁻ 안에서 세기 기준 CF⁻의 전체 무게를 도로 기준과 같게 한다 (CF⁻ 전체 무게는 그대로, 12단계 B)")
     ap.add_argument("--keep_unseen", action="store_true", help="보이지 않는 원인 CF⁻도 학습에 쓴다 (기본: 뺀다, 10단계 결정)")
     args = ap.parse_args()
 
@@ -144,6 +146,13 @@ def main():
     w = np.ones(len(train))
     if (st == "cf_neg").any() and (st == "cf_pos").any():
         w[st == "cf_neg"] = args.neg_to_pos * (st == "cf_pos").sum() / (st == "cf_neg").sum()
+        if args.balance_strength:
+            cat = train.df.category.fillna("").to_numpy()
+            neg, strength, road = st == "cf_neg", (st == "cf_neg") & (cat == "strength"), (st == "cf_neg") & (cat == "road")
+            w[strength] *= road.sum() / strength.sum()
+            w[neg] *= args.neg_to_pos * (st == "cf_pos").sum() / w[neg].sum()
+            print(f"  balance_strength: 세기 CF⁻ {strength.sum():,}개, 무게 {w[strength].sum() / w[neg].sum():.2f} (CF⁻ 안), "
+                  f"도로 {w[road].sum() / w[neg].sum():.2f}", flush=True)
     weights = torch.as_tensor(w, device="cuda", dtype=torch.float)
     mix = {k: round(float(w[st == k].sum() / w.sum()), 3) for k in SAMPLE_TYPES if (st == k).any()}
     print(f"[{args.name}] model {args.model}: train {len(train):,} samples, batch mix {mix} "
