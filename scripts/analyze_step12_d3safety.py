@@ -31,6 +31,8 @@ if "--obj" in sys.argv:  # 12단계 B (진단): 물체 토큰을 더한 Ours (LT
 if "--obj2" in sys.argv:  # 12단계 B 2x2: WV 묶음에서 세기 CF⁻ 무게 올림 x 정답 위치·속도
     RUNS = {"Ours+WV": "Ours_WV", "Ours+WV 세기 무게": "Ours_WVbal", "Ours+WV GT 위치·속도": "Ours_WVgtvel",
             "Ours+WV 세기 무게 GT 위치·속도": "Ours_WVbalgtvel"}
+if "--plaus" in sys.argv:  # 12단계 C: 그럴싸한 CF⁻를 CF⁻ 무게의 85%로 넣은 Ours (아키텍처와 나머지 설정은 그대로)
+    RUNS = {"Ours": "Ours_syn", "Ours+그럴싸한 CF⁻": "Ours_plaus"}
 VLMS = {"Gemma 4 12B": "gemma12b", "Gemma 4 31B": "gemma31b", "Qwen3-VL 8B": "qwen8b"}
 SAFE = ["no_at_fault_collisions", "drivable_area_compliance", "driving_direction_compliance"]
 
@@ -77,7 +79,7 @@ def main():
                      f"{x['rejected']:.1%} | " + ", ".join(f"{k} {vv:.0%}" for k, vv in x["safe_by_cat"].items()) + " |")
         L.append("")
     tag = ("_variants" if "--variants" in sys.argv else "_synth" if "--synth" in sys.argv else
-           "_obj" if "--obj" in sys.argv else "_obj2" if "--obj2" in sys.argv else "")
+           "_obj" if "--obj" in sys.argv else "_obj2" if "--obj2" in sys.argv else "_plaus" if "--plaus" in sys.argv else "")
     json.dump(out, open(ROOT / f"exp/step12/d3x_infeasible_safety{tag}.json", "w"), indent=1, ensure_ascii=False, default=float)
     (ROOT / f"logs/step12/d3x_safety{tag}.md").write_text("\n".join(L) + "\n")
     print("\n".join(L))

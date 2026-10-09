@@ -11,6 +11,8 @@
   python scripts/l3_build_extra.py --stage extra    # 새 행만 모은 묶음 (+ 합성에 필요한 원래 결정 행) → exp/l3/extra_{train,val}.parquet
   python scripts/l3_synth.py --input exp/l3/extra_train.parquet --out exp/l3/extra_train_synth.parquet  (val도)
   python scripts/l3_build_extra.py --stage variants  # → exp/l3/train_bundle_{train,val}_{W,V,WV}.parquet
+12단계 C: python scripts/l3_build_extra.py --stage plausible  # 합성 묶음 + 그럴싸한 CF⁻(scripts/l3_plausible.py, 불가능만)
+  → exp/l3/train_bundle_{train,val}_plaus.parquet (source = plausible)
 """
 
 import argparse
@@ -62,9 +64,22 @@ def load_new():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--stage", choices=["extra", "variants"], required=True)
+    ap.add_argument("--stage", choices=["extra", "variants", "plausible"], required=True)
     args = ap.parse_args()
     val_logs = set((ROOT / "data_lists/navtrain_sensor_val_logs.txt").read_text().split())
+    if args.stage == "plausible":
+        pl = pd.read_parquet(EXP / "l3/navtrain_sensor_cf_plausible.parquet")
+        pl = pl[pl.status == "infeasible"]
+        rows = to_rows(pl, "plausible", human_poses("navtrain", pl.token.unique()))
+        for part in ("train", "val"):
+            base = pd.read_parquet(EXP / f"l3/train_bundle_{part}_synth.parquet").assign(source="base")
+            m = rows.log_name.isin(val_logs) if part == "val" else ~rows.log_name.isin(val_logs)
+            add = rows[m & rows.token.isin(set(base.token))]
+            out = pd.concat([base, add], ignore_index=True)
+            out.to_parquet(EXP / f"l3/train_bundle_{part}_plaus.parquet", index=False)
+            print(f"{part}: +{len(add):,} plausible CF⁻ {add.category.value_counts().to_dict()}, "
+                  f"unseen {(add.visibility == 'unseen').sum()}")
+        return
     if args.stage == "extra":
         parts = load_new()
         new = pd.concat(parts.values(), ignore_index=True)

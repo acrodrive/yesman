@@ -120,6 +120,8 @@ def main():
     ap.add_argument("--loss", choices=["l1", "mse"], default="l1")
     ap.add_argument("--balance_strength", action="store_true",
                     help="CF⁻ 안에서 세기 기준 CF⁻의 전체 무게를 도로 기준과 같게 한다 (CF⁻ 전체 무게는 그대로, 12단계 B)")
+    ap.add_argument("--plausible_share", type=float, default=0.0,
+                    help="CF⁻ 안에서 그럴싸한 CF⁻(source = plausible)의 무게 비중 (CF⁻ 전체 무게는 그대로, 12단계 C)")
     ap.add_argument("--keep_unseen", action="store_true", help="보이지 않는 원인 CF⁻도 학습에 쓴다 (기본: 뺀다, 10단계 결정)")
     args = ap.parse_args()
 
@@ -153,6 +155,13 @@ def main():
             w[neg] *= args.neg_to_pos * (st == "cf_pos").sum() / w[neg].sum()
             print(f"  balance_strength: 세기 CF⁻ {strength.sum():,}개, 무게 {w[strength].sum() / w[neg].sum():.2f} (CF⁻ 안), "
                   f"도로 {w[road].sum() / w[neg].sum():.2f}", flush=True)
+        if args.plausible_share:
+            neg = st == "cf_neg"
+            src = train.df["source"].fillna("").to_numpy() if "source" in train.df else np.full(len(train), "")
+            pl = neg & (src == "plausible")
+            w[pl] *= args.plausible_share / (1 - args.plausible_share) * w[neg & ~pl].sum() / w[pl].sum()
+            w[neg] *= args.neg_to_pos * (st == "cf_pos").sum() / w[neg].sum()
+            print(f"  plausible_share: 그럴싸한 CF⁻ {pl.sum():,}개, 무게 {w[pl].sum() / w[neg].sum():.2f} (CF⁻ 안)", flush=True)
     weights = torch.as_tensor(w, device="cuda", dtype=torch.float)
     mix = {k: round(float(w[st == k].sum() / w.sum()), 3) for k in SAMPLE_TYPES if (st == k).any()}
     print(f"[{args.name}] model {args.model}: train {len(train):,} samples, batch mix {mix} "
