@@ -40,7 +40,7 @@ renaming 범위: 목표는 사람이 문서를 읽을 때 어려움이 없게 �
 
 - [x] **기존 문서에 적용 (2026-10-14)**: `docs/step01~13`, `docs/report.md`, `yesman.md`, `README.md`에 아래 표의 용어를 적용했다(435줄). 받침이 바뀌면 뒤의 조사도 맞췄다(예: 차선을 → 차로를). `yesman.md`의 버전 기록 표는 과거 기록이라 그대로 두었다
   - 남겨 둔 것: "합성 경로", "합성 목표"(CF⁺ target 경로를 만드는 방식. A-3의 3.5절 다시 쓰기에서 문장으로 풀어 쓴다), W / V / WV(한 글자라 일괄로 바꾸면 위험. 문서를 다시 쓸 때 풀어 쓴다), "정답 경로" 중 사람의 실제 경로를 뜻하는 곳, `step07`의 "회전 결정"(VLM 결정이라 CF가 아님)
-  - [ ] 코드 안의 한국어 주석과 docstring(권장)은 아직 적용하지 않았다
+  - [x] 코드 안의 한국어 주석과 docstring(권장)에도 적용했다(2026-10-14, 42개 파일 171줄). 주석·docstring·argparse help만 바꾸고, 이미 낸 표와 그림의 출력 문자열은 그대로 두었다. 돌고 있던 `run_step14_data.sh`, `run_step14_pipeline.sh`, `download_navsim.sh`는 빼 두었다
 
 | 현행 | 수정 | 설명 |
 | --- | --- | --- |
@@ -196,9 +196,9 @@ renaming 범위: 목표는 사람이 문서를 읽을 때 어려움이 없게 �
 - [x] **그림의 결정 표시** `Decision.pretty()`, `decision_text()`. `viz_l1/l2/l3/pred/step11/synth.py` 제목을 바꿈. `follow_eval.py`가 d̂의 강도도 저장
   - [ ] 새 테스트 결과 그림(d와 d̂를 위아래로, 일치 ✓/✗, flag)은 결과가 나온 뒤 step14용 그림 스크립트로 만든다
 - [x] **추론 지연** `scripts/measure_latency.py` (노이즈 1개, 투표 K개, `--ltf`로 LTF 인코더). 맥 CPU에서 가중치 없는 새 Ours: 노이즈 1개 22 ms, 10개 56 ms
-  - [ ] `--ltf`(LTF 인코더 호출)는 pod에서 처음 확인한다
-- [ ] **CF 학습 구성 고르기 + 학습** 실행 스크립트: step14 문서가 고정되었으므로 이제 쓸 수 있다(9절의 5~8번 순서. 장면 수 단계 비교, B3와 Ours의 구성 고르기, 이전 Ours 학습, Ours 설정 ① → ② → m)
-- [ ] **최종 평가** 실행 스크립트 (고정한 모델 목록 × 새 테스트 세트, 한 번): predict → follow_eval → score_rows → flag_threshold → step14_eval
+  - [x] pod GPU(RTX 5090)에서 잼(2026-10-14, 가중치 없는 새 Ours): 디코더 노이즈 1개 9.3 ms, 10개 투표 9.3 ms(한 batch라 같음), LTF 인코더 5.1 ms. `logs/step14/latency_random_init.json`
+- [x] **CF 학습 구성 고르기 + 학습** `scripts/run_step14_train.sh` (2026-10-14, 9절의 5~8번 순서. `QUICK=1`로 흐름 확인. 아직 돌려 보지 않음, 데이터 준비가 끝나야 함)
+- [x] **최종 평가** `scripts/run_step14_final.sh` (2026-10-14. `CONFIRM=1`이 있어야 돌고, 한 번 돈 뒤에는 다시 돌지 않는다)
 
 ## D. pod 실행 순서
 
