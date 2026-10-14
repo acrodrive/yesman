@@ -13,6 +13,7 @@
   auc_kind     결정 종류 안 AUC(판단 모델만): T1 ∪ T2에서 결정 종류(yesman/decision.py decision_kind)마다 실행 가능/불가능을
                거부 점수로 가르는 AUC를 개수로 가중 평균. 거부 점수 = 1 − p (투표면 REJECT 비율)
   auc_all      전체 AUC (보조)
+  epdms_T0     T0(사람 결정)에서의 주행 점수 (보조, score_rows.py의 score = EPDMS에서 EC를 뺀 것)
   vote_flip    투표 모델: 노이즈마다 판단이 갈린 결정의 비율, 그리고 갈린 결정과 만장일치 결정의 L2 통과 후보 비율(경계 정도)
 비교: 짝지은 차이 = 같은 결정 위에서 (시드 평균한 결정별 값)의 차이, 결정 단위로 5,000번 다시 뽑은 95% 구간.
 주 비교의 Ours는 노이즈 1개이다. 성공 판정(7.1절)은 비교마다 따로 하고, 여러 번 비교한 보정은 하지 않는다.
@@ -58,7 +59,9 @@ def load(run, s, vote=""):
     f = pd.read_parquet(d / f"{name}_l1.parquet")
     sc_path = d / f"{name}_scores.parquet"
     if sc_path.exists():
-        f["safe_path"] = (pd.read_parquet(sc_path)[SAFE].min(axis=1) >= 1).to_numpy()
+        sc = pd.read_parquet(sc_path)
+        f["safe_path"] = (sc[SAFE].min(axis=1) >= 1).to_numpy()
+        f["epdms"] = sc["score"].to_numpy()
     th = d / "flag_threshold.json"
     if "vote_accept" in f:
         f["accept"] = f.vote_accept.astype(bool)
@@ -83,6 +86,7 @@ def per_decision(run, vote, sets):
         base["mismatch"] = np.mean([((f.accept & ~f.follow) | (~f.accept & f.follow)).to_numpy() for f in fs], 0)
         if "safe_path" in fs[0]:
             base["safe"] = np.mean([f.safe_path.to_numpy() for f in fs], 0)
+            base["epdms"] = np.mean([f.epdms.to_numpy() for f in fs], 0)
         if "reject_score" in fs[0]:
             base["reject_score"] = np.mean([f.reject_score.to_numpy() for f in fs], 0)
         if "vote_n_reject" in fs[0]:
@@ -105,6 +109,8 @@ def metrics(pd_, eval_sets, judge):
     m = {}
     if "T1" in pd_:
         m["follow"] = pd_["T1"].follow.mean()
+    if "T0" in pd_ and "epdms" in pd_["T0"]:
+        m["epdms_T0"] = pd_["T0"].epdms.mean()
     feas = [pd_[s] for s in ("T0", "T1") if s in pd_]
     if feas:
         m["over_reject"] = pd.concat(feas).reject.mean()

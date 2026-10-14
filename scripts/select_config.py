@@ -14,6 +14,9 @@ ACCEPT: 노이즈 투표 결과가 있으면 vote_accept, 판단 head가 있으�
   그래서 판단은 AUC로 재고, upper 점수는 판단 학습이 경로를 해치지 않았는지만 확인한다.
   AUC: CF⁺(실행 가능)와 CF⁻(실행 불가능, 보이지 않는 원인 제외)를 거부 점수 1 − p로 가르는 AUC를 결정 종류
   (yesman/decision.py decision_kind)마다 내고 개수로 가중 평균 (scripts/step14_eval.py의 auc_kind와 같은 정의)
+- steps (4.2절, 학습 step 수): 일치율과 안전율의 평균이 가장 좋은 후보와 0.01 이내인 후보 중 --cands에서 가장 앞의 것
+  (후보를 짧은 것부터 적는다)
+- size (4.2절, 모델 크기): --base(지금 크기)보다 평균이 0.01 넘게 좋은 후보가 있으면 그중 가장 좋은 것, 없으면 --base
 - frog5 (5.2절, 노이즈 투표 m): 실행 가능한 결정(원래 + CF⁺)을 거부하는 비율이 --frog_max 이하인 후보 중 안전율이 가장 높은 것
 
 입력 파일 (exp/eval/<run>/): <set>_l1.parquet (follow_eval.py), <set>_scores.parquet (score_rows.py),
@@ -96,20 +99,20 @@ def auc_kind(run, s, f, pos, neg) -> float:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--rule", choices=["upper", "auc", "frog5"], required=True)
+    ap.add_argument("--rule", choices=["upper", "auc", "steps", "size", "frog5"], required=True)
     ap.add_argument("--cands", nargs="+", required=True)
     ap.add_argument("--upper_follow", default="", help="upper: 일치율 상한선을 잴 실행 (B2, 코드 이름 Bcomply_*)")
     ap.add_argument("--upper_safe", default="", help="upper: 안전율 상한선을 잴 실행 (B0, 코드 이름 B1_*)")
     ap.add_argument("--w", type=float, default=0.5, help="upper: 일치율 쪽 무게 (사전 등록에서 확정)")
     ap.add_argument("--base", default="", help="auc: 기본 설정의 실행 (마지막 층, DiT와 함께 학습). 후보에도 들어간다")
-    ap.add_argument("--guard", type=float, default=0.01, help="auc: upper 점수가 기본 설정보다 이만큼 넘게 낮으면 뺀다")
+    ap.add_argument("--guard", type=float, default=0.01, help="auc: upper 점수 허용 폭, steps / size: 평균의 허용 폭")
     ap.add_argument("--frog_max", type=float, default=0.05)
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
 
     cands = list(args.cands)
-    if args.rule == "auc":
-        assert args.base, "auc 규칙은 --base(기본 설정)가 필요하다"
+    if args.rule in ("auc", "size"):
+        assert args.base, "auc, size 규칙은 --base(기본 설정)가 필요하다"
         cands = [args.base] + [c for c in cands if c != args.base]
     rows = [measure(*parse(c)) for c in cands]
     res = {"rule": args.rule, "cands": rows}
@@ -119,8 +122,16 @@ def main():
         res.update(upper_follow=uf, upper_safe=us, w=args.w)
         for r in rows:
             r["score"] = args.w * r["follow"] / uf + (1 - args.w) * r["safe"] / us
+    for r in rows:
+        r["mean"] = (r["follow"] + r["safe"]) / 2
     if args.rule == "upper":
         best = max(rows, key=lambda r: r["score"])
+    elif args.rule == "steps":
+        top = max(r["mean"] for r in rows)
+        best = next(r for r in rows if r["mean"] >= top - args.guard)
+    elif args.rule == "size":
+        better = [r for r in rows[1:] if r["mean"] > rows[0]["mean"] + args.guard]
+        best = max(better, key=lambda r: r["mean"]) if better else rows[0]
     elif args.rule == "auc":
         floor = rows[0]["score"] - args.guard
         ok = [r for r in rows if r["score"] >= floor and np.isfinite(r["auc_kind"])]
@@ -132,9 +143,10 @@ def main():
         res["frog_max"] = args.frog_max
     res["best"] = None if best is None else f"{best['run']}:{best['set']}"
 
-    cols = ["run", "set", "follow", "safe", "frog", "reject_neg", "auc_kind"] + (["score"] if args.rule != "frog5" else [])
+    cols = ["run", "set", "follow", "safe", "mean", "frog", "reject_neg", "auc_kind"] + \
+        (["score"] if args.rule in ("upper", "auc") else [])
     print(pd.DataFrame(rows)[cols].to_string(index=False, float_format=lambda x: f"{x:.4f}"))
-    if args.rule != "frog5":
+    if args.rule in ("upper", "auc"):
         print(f"상한선: 일치율 {res['upper_follow']:.4f} ({args.upper_follow}), 안전율 {res['upper_safe']:.4f} ({args.upper_safe})")
     print("고른 후보:", res["best"] or "없음 (조건을 만족하는 후보가 없다)")
     if args.out:
