@@ -3,6 +3,8 @@
 장면: D0(구조적 애매함이 없는 navtest 장면 11,751개)에서 무작위로 n개 (시드 0). 무작위로 고르는 이유는
 RQ2가 "실제 VLM 결정의 오류 분포"를 재기 때문이다(장면 종류를 일부러 맞추면 분포가 바뀐다).
 
+14단계 새 테스트 세트: --from_table data_lists/eval_step14/T0.parquet --split navtrain (T0의 장면 전부, 무작위로 고르지 않는다)
+
 사용법: python scripts/d3_prepare.py [--n 1000]
 출력: exp/d3/scenes.parquet (token, log_name, cam_l0/f0/r0 경로, speed, accel, command)
 """
@@ -27,9 +29,12 @@ def main():
     ap.add_argument("--exclude", type=Path, default=None, help="이 표의 장면은 빼고 고른다 (12단계 D3 확장)")
     ap.add_argument("--out", type=Path, default=ROOT / "exp/d3/scenes.parquet")
     ap.add_argument("--split", default="navtest", help="navtrain: 학습 묶음의 모든 장면 (12단계 A, 실제 VLM 결정으로 CF 만들기)")
+    ap.add_argument("--from_table", type=Path, default=None, help="14단계: 이 표(token, log_name)의 장면 전부")
     args = ap.parse_args()
 
-    if args.split == "navtrain":
+    if args.from_table:
+        pick = pd.read_parquet(args.from_table, columns=["token", "log_name"]).drop_duplicates("token").sort_values("token")
+    elif args.split == "navtrain":
         pick = pd.concat([pd.read_parquet(ROOT / f"exp/l3/train_bundle_{b}.parquet", columns=["token", "log_name", "sample_type"])
                           for b in ("train", "val")])
         pick = pick[pick.sample_type == "original"].drop_duplicates("token").sort_values("token")

@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 from navsim.common.dataloader import MetricCacheLoader
+from yesman.eval_sets import cache_of
 from yesman.scoring import BatchScorer
 
 EXP = Path(os.environ["NAVSIM_EXP_ROOT"])
@@ -29,16 +30,18 @@ METRICS = ["no_at_fault_collisions", "drivable_area_compliance", "driving_direct
 W = {"ego_progress": 5, "time_to_collision_within_bound": 5, "lane_keeping": 2, "history_comfort": 2}
 MULT = ["no_at_fault_collisions", "drivable_area_compliance", "driving_direction_compliance", "traffic_light_compliance"]
 _S = None
+_CACHE = None
 
 
-def _init():
-    global _S
+def _init(cache):
+    global _S, _CACHE
     _S = BatchScorer(human_penalty_filter=True)
+    _CACHE = cache
 
 
 def score_group(args):
     token, items = args
-    mcl = MetricCacheLoader(EXP / "metric_cache/navtest")
+    mcl = MetricCacheLoader(EXP / f"metric_cache/{_CACHE}")
     mc = mcl.get_from_token(token)
     human = _S.human_metrics(mc)
     out = []
@@ -58,7 +61,9 @@ def main():
     ap.add_argument("--col", default="pred_poses")
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--workers", type=int, default=28)
+    ap.add_argument("--cache", default=None, help="metric cache 폴더 이름 (기본: 표 파일 이름에서 정함, yesman/eval_sets.py)")
     args = ap.parse_args()
+    cache = args.cache or cache_of(args.table.stem)
     df = pd.read_parquet(args.table, columns=["token", args.col])
     has = df[args.col].map(lambda p: p is not None and len(p) == 24)
     groups = {}
@@ -66,7 +71,7 @@ def main():
         if has.iloc[i]:
             groups.setdefault(t, []).append((i, np.asarray(p, dtype=np.float64).reshape(8, 3)))
     t0, rows = time.time(), []
-    with Pool(args.workers, initializer=_init) as pool:
+    with Pool(args.workers, initializer=_init, initargs=(cache,)) as pool:
         for r in pool.imap_unordered(score_group, list(groups.items()), chunksize=8):
             rows.extend(r)
     res = pd.DataFrame(rows).set_index("i").reindex(range(len(df)))

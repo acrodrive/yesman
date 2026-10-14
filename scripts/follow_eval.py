@@ -23,6 +23,7 @@ import pandas as pd
 
 from yesman.data import scene_loader, scene_without_sensors
 from yesman.decision import same_decision
+from yesman.eval_sets import base_name, split_of
 from yesman.l1 import classify, extract_features, load_thresholds
 from yesman.l2 import row_to_decision
 
@@ -63,8 +64,10 @@ def judge_log(args):
                 row[f"seg{k}_lon_err"] = abs(a.lon_strength - b.lon_strength) if a.lon == b.lon else np.nan
                 row[f"seg{k}_lat_err"] = (abs(a.lat_strength - b.lat_strength)
                                           if a.lat == b.lat and a.lat != "keep_lane" else np.nan)
-            for k, s in enumerate(dh.segments, 1):
-                row.update({f"dhat_seg{k}_lon": s.lon, f"dhat_seg{k}_lat": s.lat})
+            for k, s in enumerate(dh.segments, 1):  # 강도도 남긴다: 그림에 d̂을 decision_text(row, prefix="dhat_")로 쓴다
+                row.update({f"dhat_seg{k}_lon": s.lon, f"dhat_seg{k}_lat": s.lat,
+                            f"dhat_seg{k}_lon_strength": s.lon_strength, f"dhat_seg{k}_lat_strength": s.lat_strength,
+                            f"dhat_seg{k}_ambiguous_lon": s.ambiguous_lon, f"dhat_seg{k}_ambiguous_lat": s.ambiguous_lat})
         out.append(row)
     return out
 
@@ -72,7 +75,7 @@ def judge_log(args):
 def run_set(run, name, workers):
     df = pd.read_parquet(EXP / f"eval/{run}/{name}.parquet")
     df["i"] = np.arange(len(df))
-    split = "navtrain" if name in ("val", "train5k") else "navtest"
+    split = split_of(name)
     cols = ["i", "token", "pred_poses"] + [c for c in df.columns if c.startswith("d_seg")]
     tasks = [(split, log, g[cols].to_dict("records")) for log, g in df.groupby("log_name")]
     tasks.sort(key=lambda t: -len(t[2]))
@@ -82,7 +85,8 @@ def run_set(run, name, workers):
             rows.extend(r)
     res = pd.DataFrame(rows).set_index("i").sort_index()
     keep = [c for c in ("token", "log_name", "cf_name", "sample_type", "change_type", "flag", "category",
-                        "visibility", "status", "p") if c in df.columns]
+                        "visibility", "status", "p", "vote_accept", "vote_n_reject", "vote_p_mean")
+            if c in df.columns]
     out = pd.concat([df[keep], res], axis=1)
     out.to_parquet(EXP / f"eval/{run}/{name}_l1.parquet", index=False)
     print(f"[{run}] {name}: {len(out):,} rows, {time.time() - t0:.0f}s", flush=True)
@@ -113,7 +117,8 @@ def main():
     summ = json.load(open(summ_path)) if summ_path.exists() else {}
     for name in args.sets:
         out = run_set(args.run, name, args.workers)
-        by = {"D1": "cf_name", "val": "sample_type", "train5k": "sample_type", "D2": "category"}.get(name)
+        by = {"D1": "cf_name", "T1": "cf_name", "val": "sample_type", "train5k": "sample_type", "D2": "category",
+              "T2": "category"}.get(base_name(name))
         summ[name] = summarize(out, by)
         print(json.dumps(summ[name]["all"]))
     json.dump(summ, open(summ_path, "w"), indent=1)

@@ -202,3 +202,34 @@ def collision_cause_visibility(scene, poses: np.ndarray) -> str:
                     return "unseen"  # 현재 시점에는 아직 없던 물체
                 return "visible" if visible_now(now[t]) else "unseen"
     return "unknown"
+
+
+# ----------------------------------------------------------------------------------------------------------------
+# CF⁺ target 경로의 대체 규칙 (10b단계 규칙을 판정할 때 바로 고른다, 14단계)
+# ----------------------------------------------------------------------------------------------------------------
+
+def strength_err(d: Decision, dh: Decision) -> float:
+    """구간별로 같은 행동끼리의 강도 차이 중 가장 큰 값 (keep lane 제외)."""
+    e = 0.0
+    for a, b in zip(d.segments, dh.segments):
+        if a.lon == b.lon:
+            e = max(e, abs(a.lon_strength - b.lon_strength))
+        if a.lat == b.lat and a.lat != "keep_lane":
+            e = max(e, abs(a.lat_strength - b.lat_strength))
+    return e
+
+
+def closest_target(res, ctx, d: Decision, human: np.ndarray, tol: float = 0.1) -> Optional[np.ndarray]:
+    """L2를 통과한 후보 중 강도가 결정과 ±tol 안인 것(없으면 통과한 후보 전체)에서 사람 경로와 평균 거리가 가장 가까운
+    경로 (scripts/l3_retarget.py와 같은 규칙). res: L2Result, ctx: SceneContext, human: 사람 경로 (8, 3)."""
+    if res.status != "feasible" or res.scored_poses is None:
+        return None
+    cands = []
+    for idx, ok, poses in zip(res.scored_bank_idx, res.scored_pass, res.scored_poses):
+        if ok:
+            dh = ctx.relabel_cache[(idx, res.mode)][1]
+            cands.append((strength_err(d, dh), float(np.linalg.norm(poses[:, :2] - human[:, :2], axis=1).mean()), poses))
+    if not cands:
+        return None
+    pool = [c for c in cands if c[0] <= tol] or cands
+    return min(pool, key=lambda c: c[1])[2]

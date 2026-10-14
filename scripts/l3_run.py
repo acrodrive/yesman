@@ -4,7 +4,8 @@
 출력: exp/l3/<name>.parquet — 장면 x 결정(원래 + CF)마다 한 줄
   열: token, log_name, cf_name(original / keep / lc_L ...), change_type, d_seg*_ (결정), status, reason,
       fail_*, category(strength/agent/road, CF⁻만), visibility(visible/unseen/unknown, agent 기준만),
-      weaker_status, best_poses(가능: 목표 경로, 불가능: 떨어진 후보 중 최고), n_* 후보 수 등
+      weaker_status, best_poses(가능: 목표 경로, 불가능: 떨어진 후보 중 최고), n_* 후보 수 등,
+      closest_poses(14단계: 가능일 때 통과한 후보 중 사람 경로에 가장 가까운 것, yesman/l3.py closest_target)
 
 사용법:
   python scripts/l3_run.py --split navtest --name navtest_cf                 # 평가 세트용: CF 메뉴 전부
@@ -27,7 +28,8 @@ from navsim.common.dataloader import MetricCacheLoader
 from yesman.data import scene_loader
 from yesman.decision import Decision
 from yesman.l2 import L2, L2Config, PathBank, row_to_decision
-from yesman.l3 import categorize, cf_menu, cf_menu_wide, change_type, collision_cause_visibility, weaker
+from yesman.l3 import (categorize, cf_menu, cf_menu_wide, change_type, closest_target, collision_cause_visibility,
+                       weaker)
 
 EXP = Path(os.environ["NAVSIM_EXP_ROOT"])
 TURN_CFS = ("turn_L", "turn_R", "turn_late_L", "turn_late_R")
@@ -49,7 +51,7 @@ def init_worker(cfg_dict):
     _L2 = L2(PathBank(), L2Config(**cfg_dict))
 
 
-def _row(token, log, name, d: Decision, res, d0: Decision):
+def _row(token, log, name, d: Decision, res, d0: Decision, ctx=None, human=None):
     row = res.to_flat()
     row.update(token=token, log_name=log, cf_name=name, change_type="original" if name == "original" else
                change_type(d0, d), decision=str(d))
@@ -57,6 +59,9 @@ def _row(token, log, name, d: Decision, res, d0: Decision):
         if k.startswith("seg"):
             row[f"d_{k}"] = v
     row["best_poses"] = (res.best_poses.astype("float32").ravel().tolist() if res.best_poses is not None else [])
+    if ctx is not None and human is not None and name != "original":
+        c = closest_target(res, ctx, d, human)
+        row["closest_poses"] = c.astype("float32").ravel().tolist() if c is not None else []
     return row
 
 
@@ -70,6 +75,7 @@ def run_log(args):
         try:
             scene = loader.get_scene_from_token(r["token"])
             ctx = _L2.context(scene, mcl.get_from_token(r["token"]))
+            human = scene.get_future_trajectory(8).poses  # CF⁺ target 경로의 대체 규칙에 쓴다 (14단계)
             d0 = row_to_decision(r)
             if wide:  # 12단계 A: 넓힌 메뉴 (장면마다 4개, 시드 = token)
                 menu = cf_menu_wide(d0, ctx.v0, np.random.default_rng(zlib.crc32(f"{r['token']}:wide".encode())))
@@ -91,7 +97,7 @@ def run_log(args):
                                 **{f"d_{k}": v for k, v in d.to_flat().items() if k.startswith("seg")}})
                     continue
                 res = judge(ctx, d, seed, is_cf=name != "original")
-                row = _row(r["token"], log, name, d, res, d0)
+                row = _row(r["token"], log, name, d, res, d0, ctx, human)
                 if name != "original" and res.status == "infeasible":
                     w = weaker(d0, d)
                     wres = judge(ctx, w, seed + 1, is_cf=True) if w is not None else None

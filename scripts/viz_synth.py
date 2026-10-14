@@ -27,6 +27,7 @@ from navsim.common.dataclasses import SensorConfig  # noqa: E402
 from navsim.visualization.bev import add_annotations_to_bev_ax, add_map_to_bev_ax  # noqa: E402
 from yesman.data import scene_loader  # noqa: E402
 from yesman.plot_style import use_korean_font  # noqa: E402
+from yesman.decision import decision_text  # noqa: E402
 
 ROOT = Path(os.environ["YESMAN_ROOT"])
 STYLE = {"사람": dict(color="k", ls="--", lw=1.5), "기존 목표": dict(color="#9a9990", ls="-", lw=4, alpha=0.7),
@@ -58,7 +59,7 @@ def draw(scene, row, old, out):
     ax.set_xlim(20, -20)
     ax.set_ylim(-10, 40)
     ax.legend(loc="lower right", fontsize=9)
-    fig.suptitle(f"{row['cf_name']} [{row['token']}] {row['target_rule']}\n결정: {row['decision']}", fontsize=11)
+    fig.suptitle(f"{row['cf_name']} [{row['token']}] {row['target_rule']}\n{decision_text(row, '결정: ')}", fontsize=11)
     fig.savefig(out, dpi=60)
     plt.close(fig)
 

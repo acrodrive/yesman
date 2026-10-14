@@ -26,6 +26,7 @@ from navsim.common.dataclasses import SensorConfig
 from navsim.visualization.bev import add_annotations_to_bev_ax, add_map_to_bev_ax
 from yesman.data import scene_loader
 from yesman.l2 import BANK_PATH
+from yesman.decision import decision_text  # noqa: E402
 
 EXP = Path(os.environ["NAVSIM_EXP_ROOT"])
 
@@ -82,7 +83,7 @@ def draw(scene, row, bank_poses, out_dir: Path, tag: str, rng: float = 40.0) -> 
     ax.legend(loc="lower right", fontsize=8)
     fails = ", ".join(f"{k[5:]} {row[k]:.0%}" for k in ("fail_collision", "fail_off_road", "fail_wrong_way")
                       if k in row and pd.notna(row[k]))
-    fig.suptitle(f"{tag}{row['token']} [{row['decision_type']}, {row.get('mode', 'ego')}]  decision: {row['decision']}\n"
+    fig.suptitle(f"{tag}{row['token']} [{row['decision_type']}, {row.get('mode', 'ego')}]  \n{decision_text(row, 'd: ')}\n"
                  f"L2: {row['status'].upper()}  reason: {row['reason'] or '-'}  |  candidates: prefilter "
                  f"{row['n_prefilter']}, match {row['n_match']}/{row['n_relabeled']}, pass {row['n_pass']}/"
                  f"{row['n_scored']}  |  fail rate: {fails}", fontsize=10, family="monospace")

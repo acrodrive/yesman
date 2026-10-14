@@ -27,6 +27,7 @@ from viz_l2 import future_tracks  # noqa: E402
 from navsim.common.dataclasses import SensorConfig  # noqa: E402
 from navsim.visualization.bev import add_annotations_to_bev_ax, add_map_to_bev_ax  # noqa: E402
 from yesman.data import scene_loader  # noqa: E402
+from yesman.decision import decision_text  # noqa: E402
 
 EXP = Path(os.environ["NAVSIM_EXP_ROOT"])
 
@@ -62,7 +63,7 @@ def draw(scene, row, out_dir: Path, tag: str, rng: float = 40.0) -> Path:
                       if k in row and isinstance(row[k], str) and row[k])
     fails = "  ".join(f"{k[5:]} {row[k]:.0%}" for k in ("fail_collision", "fail_off_road", "fail_wrong_way")
                       if k in row and pd.notna(row[k]))
-    title = f"{tag}{row['token']} [{row['cf_name']}]  decision: {row['decision']}\n{extra}  |  fail rate: {fails}"
+    title = f"{tag}{row['token']} [{row['cf_name']}]  \n{decision_text(row, 'd: ')}\n{extra}  |  fail rate: {fails}"
     if row.get("human_decision"):
         title += f"\nhuman: {row['human_decision']}  (v0 {np.linalg.norm(frame.ego_status.ego_velocity[:2]):.1f} m/s)"
     if row.get("key_issue"):

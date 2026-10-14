@@ -28,6 +28,7 @@ from navsim.common.dataclasses import SensorConfig  # noqa: E402
 from navsim.visualization.bev import add_annotations_to_bev_ax, add_map_to_bev_ax  # noqa: E402
 from navsim.visualization.camera import _transform_points_to_image  # noqa: E402
 from yesman.data import scene_loader  # noqa: E402
+from yesman.decision import decision_text  # noqa: E402
 
 LINES = {"human": dict(color="k", ls="--", lw=1.5), "target": dict(color="limegreen", ls="-", lw=7, alpha=0.5),
          "pred": dict(color="darkorange", ls="-", lw=2.5)}
@@ -81,7 +82,7 @@ def draw(scene, row, out: Path, tag: str, rng: float = 40.0):
     ax.set_ylim(-rng / 4, rng)
     ax.legend(loc="lower right", fontsize=8)
     err = np.linalg.norm(paths["pred"][:, :2] - np.asarray(row["target_poses"]).reshape(8, 3)[:, :2], axis=1)
-    fig.suptitle(f"{tag}{row['token']} [{row['sample_type']}/{row['cf_name']}] decision: {row['decision']}\n"
+    fig.suptitle(f"{tag}{row['token']} [{row['sample_type']}/{row['cf_name']}] \n{decision_text(row, 'd: ')}\n"
                  f"pred vs target ADE {err.mean():.2f} m, FDE {err[-1]:.2f} m", fontsize=10, family="monospace")
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"{tag}{row['token']}_{row['cf_name']}.png"

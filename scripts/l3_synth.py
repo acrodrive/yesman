@@ -90,7 +90,7 @@ def main():
     orig = {r["token"]: r for r in df[df.sample_type == "original"][cols].to_dict("records")}
     pos = df[df.sample_type == "cf_pos"]
     if args.input:
-        pos = pos[pos.target_rule == "new_l2best"]
+        pos = pos[pos.target_rule.isin(["new_l2best", "new_closest"])]  # 14단계 묶음은 new_closest (실패하면 그대로 둔다)
     tasks = sorted(((log, g.sort_values("token")[cols].to_dict("records"), {t: orig[t] for t in g.token.unique()})
                     for log, g in pos.groupby("log_name")), key=lambda t: -len(t[1]))
     if args.max_logs:

@@ -3,6 +3,8 @@
 사용법 (source scripts/setup/env.sh 후, GPU pod):
     python scripts/ltf_features.py --split navtest
     python scripts/ltf_features.py --split navtrain   # 센서를 받은 장면(data_lists/navtrain_sensor_tokens.txt)만
+    python scripts/ltf_features.py --split navtrain --tokens data_lists/step14/camera_all_tokens.txt \
+        --logs data_lists/step14/camera_all_logs.txt --name navtrain_step14   # 14단계: 카메라가 있는 navtrain 장면 전부
 
 저장하는 것 (exp/features/ltf/<split>/, 장면 순서는 tokens.txt와 같다)
     keyval       (N, 65, 256) fp16  LTF 트랜스포머 디코더가 보는 토큰 (BEV 8x8=64개 + 차량 상태 1개, 위치 임베딩 포함)
@@ -53,7 +55,9 @@ def load_agent() -> TransfuserAgent:
     return agent.eval()
 
 
-def split_tokens(split: str):
+def split_tokens(split: str, path=None):
+    if path is not None:
+        return sorted(open(path).read().split())
     if split == "navtrain":
         return sorted(open(ROOT / "data_lists/navtrain_sensor_tokens.txt").read().split())
     return None  # navtest: scene filter 전체
@@ -102,22 +106,29 @@ def main():
     ap.add_argument("--workers", type=int, default=28)
     ap.add_argument("--shard", type=int, default=2000)
     ap.add_argument("--limit", type=int, default=0, help="앞에서 N장면만 (시험용)")
+    ap.add_argument("--tokens", type=Path, default=None, help="이 장면들만 (기본: navtrain은 navtrain_sensor_tokens.txt)")
+    ap.add_argument("--logs", type=Path, default=None, help="--tokens 장면이 들어 있는 로그 (기본: navtrain_sensor_logs.txt)")
+    ap.add_argument("--name", default=None, help="저장 폴더 이름 (기본: split)")
     args = ap.parse_args()
 
-    out = args.out / args.split
+    out = args.out / (args.name or args.split)
     (out / "_shards").mkdir(parents=True, exist_ok=True)
     agent = load_agent().cuda()
     t0 = time.time()
-    tokens = split_tokens(args.split)
+    tokens = split_tokens(args.split, args.tokens)
     logs = None
     if tokens is not None:
-        logs = open(ROOT / "data_lists/navtrain_sensor_logs.txt").read().split()
+        logs = open(args.logs or ROOT / "data_lists/navtrain_sensor_logs.txt").read().split()
     loader = scene_loader(args.split, log_names=logs, tokens=tokens, sensor_config=agent.get_sensor_config())
     tokens = sorted(loader.tokens)
     if args.limit:
         tokens = tokens[: args.limit]
     print(f"[{args.split}] {len(tokens)} scenes (loader {time.time() - t0:.0f}s)", flush=True)
-    (out / "tokens.txt").write_text("\n".join(tokens) + "\n")
+    tok_txt = "\n".join(tokens) + "\n"
+    # _shards/는 장면 순서로 이어 쓰므로, 장면 목록이 바뀐 폴더에 이어 쓰면 특징과 장면이 어긋난다
+    if (out / "tokens.txt").exists() and (out / "tokens.txt").read_text() != tok_txt:
+        raise SystemExit(f"{out}/tokens.txt가 이번 장면 목록과 다르다. 다른 --name을 쓰거나 폴더를 지운다")
+    (out / "tokens.txt").write_text(tok_txt)
 
     builder = agent.get_feature_builders()[0]
     n_shards = (len(tokens) + args.shard - 1) // args.shard

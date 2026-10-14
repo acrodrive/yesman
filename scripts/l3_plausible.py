@@ -37,11 +37,12 @@ import l3_run  # noqa: E402
 ROOT = Path(os.environ["YESMAN_ROOT"])
 EXP = Path(os.environ["NAVSIM_EXP_ROOT"])
 FEAT = ROOT / "exp/features/ltf/navtrain"
+CACHE = "navtrain_sensor"
 K, DV, PAST = 10, 2.0, (1.0, 2.5, 1.5)  # K: 처음 4로 정했으나 시험(로그 24개)에서 불가능이 2.7%라 10으로 늘림 (모델 결과 보기 전)
 
 
-def lookalikes(tokens, logs):
-    """장면마다 비슷해 보이는 다른 로그 장면 K개의 행 번호."""
+def lookalikes(tokens, logs, pool=None):
+    """장면마다 비슷해 보이는 다른 로그 장면 K개의 행 번호. pool: 이웃으로 쓸 수 있는 장면 (bool, 길이 = 특징 장면 수)."""
     kv = torch.from_numpy(np.load(FEAT / "keyval.npy")).cuda().float().mean(1)
     emb = torch.nn.functional.normalize(kv, dim=1)
     st = torch.from_numpy(np.load(FEAT / "status.npy")).cuda().float()
@@ -52,6 +53,8 @@ def lookalikes(tokens, logs):
         sl = slice(lo, lo + 2048)
         sim = emb[sl] @ emb.T
         bad = (log_id[sl, None] == log_id[None]) | (cmd[sl, None] != cmd[None]) | ((v[sl, None] - v[None]).abs() > DV)
+        if pool is not None:
+            bad |= ~pool[None]
         sim[bad] = -2
         top = sim.topk(K, dim=1)
         out.append(torch.where(top.values > -2, top.indices, -1).cpu().numpy())
@@ -60,7 +63,7 @@ def lookalikes(tokens, logs):
 
 def judge_log(args):
     log, rows, log_tokens = args
-    mcl = MetricCacheLoader(EXP / "metric_cache/navtrain_sensor")
+    mcl = MetricCacheLoader(EXP / f"metric_cache/{CACHE}")
     loader = scene_loader("navtrain", [log], sorted(set(log_tokens) | {r["token"] for r in rows}))
     nh = loader._scene_filter.num_history_frames
     ts = {t: loader.scene_frames_dicts[t][nh - 1]["timestamp"] / 1e6 for t in loader.tokens}
@@ -72,15 +75,17 @@ def judge_log(args):
             prev = [(abs((ts[r["token"]] - ts[t]) - PAST[2]), t) for t in ts
                     if PAST[0] <= ts[r["token"]] - ts[t] <= PAST[1] and t in log_tokens]
             if prev:
-                cands["past"] = log_tokens[min(prev)[1]]
+                cands["past"] = {**log_tokens[min(prev)[1]], "_src": min(prev)[1]}
             decs = {}
+            src = {}
             for name, lab in cands.items():
                 if not lab.get("valid", False):
                     continue
-                d = row_to_decision(lab)
+                d = row_to_decision({k: v for k, v in lab.items() if k != "_src"})
                 if same_decision(d0, d) or any(same_decision(x, d, allow_neighbor=False) for x in decs.values()):
                     continue
                 decs[name] = d
+                src[name] = lab.get("_src", "")
             if not decs:
                 continue
             scene = loader.get_scene_from_token(r["token"])
@@ -88,7 +93,8 @@ def judge_log(args):
             for name, d in decs.items():
                 seed = zlib.crc32(f"{r['token']}:{name}".encode())
                 res = l3_run.judge(ctx, d, seed, is_cf=True)
-                row = l3_run._row(r["token"], log, name, d, res, d0)
+                row = l3_run._row(r["token"], log, name, d, res, d0, ctx, scene.get_future_trajectory(8).poses)
+                row["src_token"] = src[name]  # 이 결정을 빌려 온 장면 (14단계 그럴싸함 점수에서 이웃으로 쓰지 않는다)
                 if res.status == "infeasible":
                     w = weaker(d0, d)
                     wres = l3_run.judge(ctx, w, seed + 1, is_cf=True) if w is not None else None
@@ -108,15 +114,30 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--workers", type=int, default=28)
     ap.add_argument("--max_logs", type=int, default=0, help="시험: 무작위 로그 N개만 (저장하지 않는다)")
+    ap.add_argument("--targets", type=Path, default=None,
+                    help="14단계: plausible CF를 만들 장면 (줄마다 token). 기본: 특징이 있는 모든 장면")
+    ap.add_argument("--pool", type=Path, default=None,
+                    help="14단계: 닮은 장면으로 쓸 수 있는 장면 (줄마다 token). 테스트·예비 장면을 빼기 위해 쓴다")
+    ap.add_argument("--cache", default="navtrain_sensor", help="metric cache 폴더 이름")
+    ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
+    global CACHE
+    CACHE = args.cache
     tokens = (FEAT / "tokens.txt").read_text().split()
     labels = pd.read_parquet(EXP / "l1/navtrain_labels.parquet").drop_duplicates("token").set_index("token")
     logs = labels.log_name.reindex(tokens).to_numpy()
-    nn = lookalikes(tokens, logs)
+    pool = None
+    if args.pool:
+        ps = set(args.pool.read_text().split())
+        pool = torch.as_tensor([t in ps for t in tokens]).cuda()
+    nn = lookalikes(tokens, logs, pool)
+    targets = set(args.targets.read_text().split()) if args.targets else None
     lab = lambda t: labels.loc[t].to_dict()  # noqa: E731
     by_log = {}
     for i, t in enumerate(tokens):
-        la = {f"lookalike_{k + 1}": lab(tokens[j]) for k, j in enumerate(nn[i]) if j >= 0}
+        if targets is not None and t not in targets:
+            continue
+        la = {f"lookalike_{k + 1}": {**lab(tokens[j]), "_src": tokens[j]} for k, j in enumerate(nn[i]) if j >= 0}
         by_log.setdefault(logs[i], []).append({"token": t, "human": lab(t), "lookalike": la})
     log_tok = labels.reset_index().groupby("log_name").token.apply(list).to_dict()
     tasks = sorted(((log, rows, {t: labels.loc[t].to_dict() for t in log_tok[log]}) for log, rows in by_log.items()),
@@ -136,7 +157,7 @@ def main():
         print("infeasible category:", df[df.status == "infeasible"].category.value_counts().to_dict())
     if args.max_logs:
         return
-    out = EXP / "l3/navtrain_sensor_cf_plausible.parquet"
+    out = args.out or EXP / "l3/navtrain_sensor_cf_plausible.parquet"
     df.to_parquet(out, index=False)
     print(f"saved {out} ({time.time() - t0:.0f}s)")
 

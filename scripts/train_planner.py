@@ -6,10 +6,14 @@
   Bcomply 결정 입력, 원래 결정 + CF⁺
   Ours    결정 입력, 원래 결정 + CF⁺ + CF⁻, 판단 head
   B3      결정 입력, 원래 결정 + CF⁺ + CF⁻, 판단 head 없음 (12단계)
+  OursDiT 결정 입력, 원래 결정 + CF⁺ + CF⁻, 판단 head를 DiT 내부 표현에서 분기 (14단계의 새 Ours.
+          문서 이름은 Ours이고, 기존 Ours는 문서에서 B4이다. docs/step14_preregistration.md)
 
 사용법
   python scripts/train_planner.py --model Bcomply --overfit_scenes 100 --steps 3000 --name step08_overfit_Bcomply
   python scripts/train_planner.py --model B2 --steps 50000 --name B2_seed0
+  python scripts/train_planner.py --model OursDiT --judge_layer 0 --judge_t_max 100 --name OursDiT_seed0
+  python scripts/train_planner.py --model OursDiT --freeze_dit --init_from B3_seed0 --name OursDiT_frozen_seed0
 
 출력: exp/train/<name>/ (model.pt, log.jsonl, eval.json)
 """
@@ -25,6 +29,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from yesman.decision import decision_kind
 from yesman.model import ModelConfig, Planner
 from yesman.train_data import SAMPLE_TYPES, load_bundle, load_features, pose_stats
 
@@ -35,6 +40,7 @@ MODELS = {
     "Bcomply": dict(use_decision=True, judge=False, sample_types=("original", "cf_pos")),
     "Ours": dict(use_decision=True, judge=True, sample_types=SAMPLE_TYPES),
     "B3": dict(use_decision=True, judge=False, sample_types=SAMPLE_TYPES),  # Ours에서 판단 head만 뺀 것 (12단계)
+    "OursDiT": dict(use_decision=True, judge=True, judge_from="dit", sample_types=SAMPLE_TYPES),  # 14단계
 }
 
 
@@ -71,7 +77,8 @@ def evaluate(model, feats, s, seeds=(0, 1, 2), n_steps=10, bs=1024):
         if m.any():
             res[st] = {"n": int(m.sum()), "ade": float(ade[:, m].mean()), "fde": float(fde[:, m].mean()),
                        "ade_p95": float(ade[:, m].quantile(0.95)), "seed_spread": float(spread[:, m].mean())}
-    if flags:  # 판단 head: p = sigmoid(flag_logit), 1 = ACCEPT. 판단 토큰은 노이즈와 무관하므로 seed 하나로 충분하다
+    if flags:  # 판단 head: p = sigmoid(flag_logit), 1 = ACCEPT. 판단 토큰(B4)은 노이즈와 무관하다. DiT 내부에서 판단하면
+        # 노이즈마다 다를 수 있으나, 학습 중 확인에는 첫 seed의 판단만 쓴다(투표는 predict_planner.py --vote_k)
         p = torch.sigmoid(torch.cat(flags))
         res["judge"] = judge_metrics(p, s.flag, s.stype)
     return res, P[0]
@@ -108,6 +115,8 @@ def main():
     ap.add_argument("--eval_every", type=int, default=5000)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--n_layers", type=int, default=4)
+    ap.add_argument("--d_model", type=int, default=256, help="디코더 폭 (14단계 크기 비교: 256 / 384)")
+    ap.add_argument("--d_ffn", type=int, default=0, help="FFN 폭 (0 = d_model x 4)")
     ap.add_argument("--no_query_out", action="store_true")
     ap.add_argument("--neg_to_pos", type=float, default=1.0, help="CF⁻ 전체 무게 / CF⁺ 전체 무게 (14절: 1:1에서 시작)")
     ap.add_argument("--w_flag", type=float, default=1.0)
@@ -123,6 +132,23 @@ def main():
     ap.add_argument("--plausible_share", type=float, default=0.0,
                     help="CF⁻ 안에서 그럴싸한 CF⁻(source = plausible)의 무게 비중 (CF⁻ 전체 무게는 그대로, 12단계 C)")
     ap.add_argument("--keep_unseen", action="store_true", help="보이지 않는 원인 CF⁻도 학습에 쓴다 (기본: 뺀다, 10단계 결정)")
+    ap.add_argument("--balance_by_type", action="store_true",
+                    help="결정 종류(구간별 앞뒤·좌우 행동, 강도 무시)마다 CF⁻ 무게 / CF⁺ 무게를 전체 비율과 같게 한다. 결정 종류만 "
+                         "보고 거부를 맞히는 지름길을 막는다 (14단계)")
+    ap.add_argument("--plaus_weight", choices=["", "kind", "strength"], default="",
+                    help="14단계 plausibility 가중치: CF⁻가 뽑히는 가중치를 그럴싸함 점수(plaus_kind / plaus_strength, "
+                         "scripts/cf_plausibility.py)에 비례해 준다. "
+                         "묶음에 점수 열이 있어야 한다(예: --bundle_suffix _step14_plaus)")
+    ap.add_argument("--plaus_min", type=float, default=0.05,
+                    help="--plaus_weight: 가중치의 min 값. 점수가 0인 터무니없는 CF⁻도 없애지 않는다(12단계 C에서 도로 기준 안전이 떨어짐)")
+    ap.add_argument("--extra_shards", type=int, nargs="*", default=None,
+                    help="14단계 묶음: 학습 추가 조각 중 이 조각들의 장면만 쓴다 (기존 조각 장면은 항상 쓴다). 장면 수를 "
+                         "단계적으로 늘리며 효과를 볼 때 쓴다. 주지 않으면 전부")
+    ap.add_argument("--judge_layer", type=int, default=0, help="OursDiT: 판단을 읽을 DiT 층 (1..n_layers, 0 = 마지막 층)")
+    ap.add_argument("--judge_t_max", type=int, default=100, help="OursDiT: 판단 손실을 계산할 노이즈 단계 상한")
+    ap.add_argument("--freeze_dit", action="store_true",
+                    help="OursDiT: --init_from 모델의 DiT를 불러와 고정하고 판단 head만 학습한다 (경로 손실 없음)")
+    ap.add_argument("--init_from", default="", help="--freeze_dit에서 DiT 가중치를 불러올 실행 이름 (예: B3_seed0)")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -139,6 +165,10 @@ def main():
         val = train
     else:
         val = load_bundle("val" + args.bundle_suffix, feats, spec["sample_types"])
+    if args.extra_shards is not None and "shard" in train.df:  # 14단계: 장면 수를 단계적으로 늘리기
+        keep = set(args.extra_shards) | {0}
+        train = train.subset(train.df.shard.isin(keep).to_numpy())
+        print(f"  extra_shards {sorted(args.extra_shards)}: 학습 장면 {train.df.token.nunique():,}", flush=True)
     if not args.keep_unseen:  # 카메라 시야 밖 원인의 CF⁻는 학습과 검증에서 뺀다 (10단계 사용자 결정)
         train = train.subset((train.df.visibility != "unseen").to_numpy())
         if val is not train:
@@ -162,19 +192,47 @@ def main():
             w[pl] *= args.plausible_share / (1 - args.plausible_share) * w[neg & ~pl].sum() / w[pl].sum()
             w[neg] *= args.neg_to_pos * (st == "cf_pos").sum() / w[neg].sum()
             print(f"  plausible_share: 그럴싸한 CF⁻ {pl.sum():,}개, 무게 {w[pl].sum() / w[neg].sum():.2f} (CF⁻ 안)", flush=True)
+        if args.plaus_weight:
+            neg = st == "cf_neg"
+            score = np.maximum(train.df[f"plaus_{args.plaus_weight}"].fillna(0).to_numpy(), args.plaus_min)
+            w[neg] *= score[neg]
+            w[neg] *= args.neg_to_pos * (st == "cf_pos").sum() / w[neg].sum()
+            print(f"  plaus_weight {args.plaus_weight}: CF⁻ 점수 평균 {score[neg].mean():.3f} (min 값 {args.plaus_min})", flush=True)
+        if args.balance_by_type:
+            kind = np.array(decision_kind(train.df))
+            pos, neg = st == "cf_pos", st == "cf_neg"
+            ratio = w[neg].sum() / w[pos].sum()
+            n_bal = 0
+            for k_ in np.unique(kind[pos | neg]):
+                kp, kn = pos & (kind == k_), neg & (kind == k_)
+                if kp.any() and kn.any():  # 한쪽만 있는 종류는 그대로 둔다
+                    w[kn] *= ratio * w[kp].sum() / w[kn].sum()
+                    n_bal += 1
+            w[neg] *= args.neg_to_pos * pos.sum() / w[neg].sum()
+            print(f"  balance_by_type: 결정 종류 {n_bal}개의 CF⁻ / CF⁺ 무게 비율을 {ratio:.3f}로 맞춤", flush=True)
     weights = torch.as_tensor(w, device="cuda", dtype=torch.float)
     mix = {k: round(float(w[st == k].sum() / w.sum()), 3) for k in SAMPLE_TYPES if (st == k).any()}
     print(f"[{args.name}] model {args.model}: train {len(train):,} samples, batch mix {mix} "
           f"({train.df.sample_type.value_counts().to_dict()}), val {len(val):,}", flush=True)
 
     cfg = ModelConfig(use_decision=spec["use_decision"], judge=spec["judge"], n_layers=args.n_layers,
+                      d_model=args.d_model, d_ffn=args.d_ffn or 4 * args.d_model,
                       use_query_out=not args.no_query_out, pred=args.pred, loss=args.loss, use_bev_sem=args.bev_sem,
-                      obj=args.obj)
+                      obj=args.obj, judge_from=spec.get("judge_from", "token"), judge_layer=args.judge_layer,
+                      judge_t_max=args.judge_t_max, judge_detach=args.freeze_dit)
     mean, std = pose_stats(train)
     model = Planner(cfg, mean, std).cuda()
+    if args.freeze_dit:  # DiT를 먼저 학습한 모델(예: B3)에서 불러와 고정하고, 판단 head만 학습한다
+        assert args.model == "OursDiT" and args.init_from, "--freeze_dit는 OursDiT와 --init_from이 필요하다"
+        sd = torch.load(ROOT / f"exp/train/{args.init_from}/model.pt", map_location="cuda", weights_only=False)["model"]
+        missing, unexpected = model.load_state_dict(sd, strict=False)
+        assert all(k.startswith("dit_head.") for k in missing) and not unexpected, (missing, unexpected)
+        for n_, p in model.named_parameters():
+            p.requires_grad = n_.startswith("dit_head.")
+        print(f"  freeze_dit: {args.init_from}에서 DiT를 불러와 고정, 학습하는 것은 dit_head뿐", flush=True)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"  params {n_params / 1e6:.2f} M, cfg {cfg.to_dict()}", flush=True)
-    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
+    opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=args.lr, weight_decay=args.wd)
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda i: min(1, (i + 1) / args.warmup) * 0.5 *
                                               (1 + math.cos(math.pi * min(i, args.steps) / args.steps)))
     log = open(out_dir / "log.jsonl", "w")
@@ -182,8 +240,9 @@ def main():
     for step in range(1, args.steps + 1):
         idx = torch.multinomial(weights, args.batch, replacement=True)
         kv, qo, dec, bev, obj = batch_inputs(feats, train, idx)
-        losses = model.loss(kv, qo, dec, train.target[idx], train.flag[idx], train.reason[idx], bev=bev, obj=obj)
-        loss = losses["traj"] + args.w_flag * losses.get("flag", 0) + args.w_reason * losses.get("reason", 0)
+        losses = model.loss(kv, qo, dec, train.target[idx], train.flag[idx], train.reason[idx], bev=bev, obj=obj,
+                            traj=not args.freeze_dit)
+        loss = losses.get("traj", 0) + args.w_flag * losses.get("flag", 0) + args.w_reason * losses.get("reason", 0)
         opt.zero_grad(set_to_none=True)
         loss.backward()
         gn = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)

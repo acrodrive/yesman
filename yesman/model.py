@@ -6,9 +6,14 @@
   MLP로 바꿔 토큰 하나를 만든다(2구간 → 토큰 2개 = 조건 c). B1은 결정 토큰을 넣지 않는다.
 - M3 경로 생성 (diffusion): waypoint 8개가 토큰 하나씩이다. 노이즈가 섞인 경로 + 시간 임베딩을 입력으로,
   self-attention(waypoint끼리)과 cross-attention(장면 토큰 + 결정 토큰)을 거쳐 깨끗한 경로(x0)를 예측한다.
-- M3 판단 토큰: 학습되는 쿼리 하나가 장면 토큰 + 결정 토큰에만 cross-attention한다(따로 된 디코더).
-  노이즈를 걷어 내는 도중의 경로는 구조적으로 보지 않으므로, 시작 노이즈가 달라도 flag가 바뀌지 않는다.
-  flag head: 실행 가능 logit 하나 (p = sigmoid). 근거 head: 충돌 / 도로 이탈 / 역주행 logit (여러 개일 수 있음).
+- M3 판단 (judge_from으로 고른다). flag head: 실행 가능 logit 하나 (p = sigmoid, 1 = ACCEPT).
+  근거 head: 충돌 / 도로 이탈 / 역주행 logit (여러 개일 수 있음).
+  - token (B4, 기존 Ours): 학습되는 쿼리 하나가 장면 토큰 + 결정 토큰에만 cross-attention한다(따로 된 디코더, DiT와 병렬).
+    노이즈를 걷어 내는 도중의 경로는 구조적으로 보지 않으므로, 시작 노이즈가 달라도 flag가 바뀌지 않는다.
+  - dit (새 Ours, 14단계): 경로 디코더(DiT)의 judge_layer번째 층 출력에서 waypoint 8개의 표현을 펼쳐 2층 MLP로 판단한다.
+    DiT는 한 번만 돌고, 최종 경로는 그 DiT의 출력이다. 샘플링에서는 노이즈 제거 마지막 단계의 표현을 쓴다. 학습에서는
+    노이즈가 적은 단계(t < judge_t_max)의 표현으로만 판단 손실을 계산한다(노이즈가 많은 단계의 표현에는 경로 정보가 적다).
+    판단이 DiT 내부에서 나오므로 시작 노이즈에 따라 달라질 수 있다(sample_vote로 노이즈 여러 개에 투표).
 
 diffusion: cosine schedule(T=1000), x0 예측(cfg.pred, 10단계에서 v 예측 시험), 학습은 L1(cfg.loss), 샘플링은 DDIM(eta=0, 기본 10단계). 경로는 학습 세트
 목표 경로의 (시점, 축)별 평균과 표준편차로 정규화한다. 앵커는 쓰지 않는다(14절 "작게 시작").
@@ -42,7 +47,11 @@ class ModelConfig:
     feat_dim: int = 256  # LTF 토큰 차원
     use_query_out: bool = True  # 장면 토큰에 LTF 디코더 출력(31개)을 더한다
     use_decision: bool = True  # False: B1 (결정을 보지 않는다)
-    judge: bool = False  # True: 판단 토큰과 head를 쓴다 (제안 방법)
+    judge: bool = False  # True: 판단 head를 쓴다 (B4, Ours)
+    judge_from: str = "token"  # token: DiT와 병렬인 판단 토큰 (B4) / dit: DiT 내부 표현에서 분기 (새 Ours, 14단계)
+    judge_layer: int = 0  # dit: 판단을 읽을 경로 디코더 층 (1..n_layers, 0 = 마지막 층. 마지막 층은 최종 LayerNorm 뒤)
+    judge_t_max: int = 100  # dit: 판단 손실을 계산할 노이즈 단계의 상한 (t는 0..judge_t_max-1에서 뽑는다)
+    judge_detach: bool = False  # dit: 판단 손실의 기울기를 DiT로 보내지 않는다 (DiT를 고정하고 head만 학습할 때)
     T: int = 1000  # diffusion 학습 시간 단계 수
     use_bev_sem: bool = False  # 장면 토큰에 LTF가 예측한 BEV 지도 분할(128x256, 7범주)의 16x16 조각 토큰 128개를 더한다
     pred: str = "x0"  # 디코더가 예측하는 것: x0 (깨끗한 경로) / v (v = sqrt(ac)·eps − sqrt(1−ac)·x0, 10단계 시험)
@@ -122,16 +131,22 @@ class Planner(nn.Module):
         self.time_mlp = nn.Sequential(nn.Linear(D, D), nn.GELU(), nn.Linear(D, D))
         self.traj_dec = _decoder(cfg, cfg.n_layers)
         self.pose_out = nn.Linear(D, POSE_DIM)
-        # M3 판단 토큰
+        # M3 판단
         if cfg.judge:
-            self.judge_query = nn.Parameter(torch.zeros(1, 1, D))
-            self.judge_dec = _decoder(cfg, cfg.n_judge_layers)
-            self.flag_head = nn.Linear(D, 1)
-            self.reason_head = nn.Linear(D, len(REASONS))
+            assert cfg.judge_from in ("token", "dit"), cfg.judge_from
+            if cfg.judge_from == "token":
+                self.judge_query = nn.Parameter(torch.zeros(1, 1, D))
+                self.judge_dec = _decoder(cfg, cfg.n_judge_layers)
+                self.flag_head = nn.Linear(D, 1)
+                self.reason_head = nn.Linear(D, len(REASONS))
+            else:  # 12단계 D의 probe와 같은 모양: waypoint 8개의 표현을 펼쳐 2층 MLP
+                assert 0 <= cfg.judge_layer <= cfg.n_layers, cfg.judge_layer
+                self.dit_head = nn.Sequential(nn.LayerNorm(N_POSES * D), nn.Linear(N_POSES * D, D), nn.GELU(),
+                                              nn.Linear(D, 1 + len(REASONS)))
         for p in (self.scene_pos, self.pose_pos) + ((self.bev_pos,) if cfg.use_bev_sem else ()) + \
                 ((self.obj_type,) if cfg.obj else ()):
             nn.init.normal_(p, std=0.02)
-        if cfg.judge:
+        if cfg.judge and cfg.judge_from == "token":
             nn.init.normal_(self.judge_query, std=0.02)
 
     # ---- 정규화 ----
@@ -165,39 +180,71 @@ class Planner(nn.Module):
             mem = torch.cat([mem, self.dec_in(dec)], 1)
         return mem
 
-    def denoise(self, z_t, t, mem, return_hidden: bool = False):
+    def denoise(self, z_t, t, mem, return_hidden: bool = False, hidden_layer: int = 0):
         """노이즈 섞인 정규화 경로 z_t (B, 8, 3), 시간 t (B,) → 예측한 깨끗한 정규화 경로 (B, 8, 3).
-        return_hidden이면 (경로, 디코더 마지막 층의 waypoint 은닉 상태 (B, 8, D))를 낸다 (12단계 probe)."""
+        return_hidden이면 (경로, hidden_layer번째 층의 waypoint 은닉 상태 (B, 8, D))를 낸다. hidden_layer 0은 마지막 층
+        (최종 LayerNorm 뒤, 12단계 probe와 같은 위치). 층을 하나씩 돌리지만 nn.TransformerDecoder의 forward와 같은
+        계산이고 가중치 이름도 같다."""
         temb = self.time_mlp(timestep_embedding(t, self.cfg.d_model))[:, None]
-        h = self.traj_dec(self.pose_in(z_t) + self.pose_pos + temb, mem)
-        return (self.pose_out(h), h) if return_hidden else self.pose_out(h)
+        h = self.pose_in(z_t) + self.pose_pos + temb
+        n = len(self.traj_dec.layers)
+        tap = None
+        for i, layer in enumerate(self.traj_dec.layers, 1):
+            h = layer(h, mem)
+            if return_hidden and hidden_layer == i and i < n:
+                tap = h
+        h = self.traj_dec.norm(h)
+        if return_hidden and tap is None:
+            tap = h
+        return (self.pose_out(h), tap) if return_hidden else self.pose_out(h)
 
     def judge_out(self, mem) -> Dict[str, torch.Tensor]:
+        """판단 토큰 (judge_from = token, B4)."""
         h = self.judge_dec(self.judge_query.expand(mem.shape[0], -1, -1), mem)[:, 0]
         return {"flag_logit": self.flag_head(h)[:, 0], "reason_logit": self.reason_head(h)}
 
+    def judge_from_hidden(self, hidden: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """DiT 내부 표현 (B, 8, D)에서 판단 (judge_from = dit, 새 Ours)."""
+        o = self.dit_head(hidden.flatten(1))
+        return {"flag_logit": o[:, 0], "reason_logit": o[:, 1:]}
+
+    def _judge_losses(self, j: Dict[str, torch.Tensor], flag, reason) -> Dict[str, torch.Tensor]:
+        out = {"flag": F.binary_cross_entropy_with_logits(j["flag_logit"], flag.float())}
+        rej = flag < 0.5  # 근거는 REJECT 샘플에서만 학습한다
+        out["reason"] = (F.binary_cross_entropy_with_logits(j["reason_logit"][rej], reason[rej].float())
+                         if rej.any() else j["reason_logit"].sum() * 0)
+        return out
+
     # ---- 학습 ----
     def loss(self, keyval, query_out, dec, target_poses, flag=None, reason=None, traj_weight=None, bev=None,
-             obj=None) -> Dict:
+             obj=None, traj: bool = True) -> Dict:
+        """traj=False면 경로 손실을 계산하지 않는다 (DiT를 고정하고 판단 head만 학습할 때)."""
         mem = self.memory(keyval, query_out, dec, bev, obj)
         x0 = self.normalize(target_poses)
         B = x0.shape[0]
-        t = torch.randint(0, self.cfg.T, (B,), device=x0.device)
-        ac = self.alphas_cumprod[t][:, None, None]
-        eps = torch.randn_like(x0)
-        z_t = ac.sqrt() * x0 + (1 - ac).sqrt() * eps
-        pred = self.denoise(z_t, t, mem)
-        target = x0 if self.cfg.pred == "x0" else ac.sqrt() * eps - (1 - ac).sqrt() * x0
-        diff = pred - target
-        l_traj = (diff.abs() if self.cfg.loss == "l1" else diff ** 2).mean((1, 2))
-        w = traj_weight if traj_weight is not None else torch.ones_like(l_traj)
-        out = {"traj": (l_traj * w).sum() / w.sum().clamp(min=1e-6)}
+        out = {}
+        if traj:
+            t = torch.randint(0, self.cfg.T, (B,), device=x0.device)
+            ac = self.alphas_cumprod[t][:, None, None]
+            eps = torch.randn_like(x0)
+            z_t = ac.sqrt() * x0 + (1 - ac).sqrt() * eps
+            pred = self.denoise(z_t, t, mem)
+            target = x0 if self.cfg.pred == "x0" else ac.sqrt() * eps - (1 - ac).sqrt() * x0
+            diff = pred - target
+            l_traj = (diff.abs() if self.cfg.loss == "l1" else diff ** 2).mean((1, 2))
+            w = traj_weight if traj_weight is not None else torch.ones_like(l_traj)
+            out["traj"] = (l_traj * w).sum() / w.sum().clamp(min=1e-6)
         if self.cfg.judge and flag is not None:
-            j = self.judge_out(mem)
-            out["flag"] = F.binary_cross_entropy_with_logits(j["flag_logit"], flag.float())
-            rej = flag < 0.5  # 근거는 REJECT 샘플에서만 학습한다
-            out["reason"] = (F.binary_cross_entropy_with_logits(j["reason_logit"][rej], reason[rej].float())
-                             if rej.any() else j["reason_logit"].sum() * 0)
+            if self.cfg.judge_from == "token":
+                j = self.judge_out(mem)
+            else:
+                # 노이즈가 적은 단계에서 DiT를 한 번 더 돌려 그 표현으로 판단한다. 샘플링의 마지막 단계(t = 0)와 가깝다
+                tj = torch.randint(0, self.cfg.judge_t_max, (B,), device=x0.device)
+                acj = self.alphas_cumprod[tj][:, None, None]
+                zj = acj.sqrt() * x0 + (1 - acj).sqrt() * torch.randn_like(x0)
+                _, hid = self.denoise(zj, tj, mem, return_hidden=True, hidden_layer=self.cfg.judge_layer)
+                j = self.judge_from_hidden(hid.detach() if self.cfg.judge_detach else hid)
+            out.update(self._judge_losses(j, flag, reason))
         return out
 
     # ---- 샘플링 ----
@@ -206,17 +253,26 @@ class Planner(nn.Module):
                z0: Optional[torch.Tensor] = None, bev: Optional[torch.Tensor] = None,
                obj: Optional[torch.Tensor] = None, return_hidden: bool = False) -> Dict[str, torch.Tensor]:
         """z0: 시작 노이즈 (B, 8, 3). 주지 않으면 generator로 뽑는다. return_hidden이면 마지막 단계의 waypoint
-        은닉 상태(out["hidden"], (B, 8, D))도 낸다."""
+        은닉 상태(out["hidden"], (B, 8, D))도 낸다. judge_from = dit이면 마지막 단계의 judge_layer 표현으로 판단한다."""
         mem = self.memory(keyval, query_out, dec, bev, obj)
         B = mem.shape[0]
         z = z0 if z0 is not None else torch.randn(B, N_POSES, POSE_DIM, device=mem.device, generator=generator)
         ts = torch.linspace(self.cfg.T - 1, 0, n_steps, device=mem.device).round().long()
+        dit_judge = self.cfg.judge and self.cfg.judge_from == "dit"
+        judge = None
         for i, t in enumerate(ts):
             tt = t.expand(B)
             last = i == len(ts) - 1
-            out = self.denoise(z, tt, mem, return_hidden=return_hidden and last)
-            if return_hidden and last:
-                out, hidden = out
+            if last and dit_judge:
+                out, jh = self.denoise(z, tt, mem, return_hidden=True, hidden_layer=self.cfg.judge_layer)
+                judge = self.judge_from_hidden(jh)
+                if return_hidden:  # probe와 같은 위치(마지막 층)의 표현
+                    hidden = jh if self.cfg.judge_layer in (0, self.cfg.n_layers) else \
+                        self.denoise(z, tt, mem, return_hidden=True)[1]
+            else:
+                out = self.denoise(z, tt, mem, return_hidden=return_hidden and last)
+                if return_hidden and last:
+                    out, hidden = out
             ac = self.alphas_cumprod[t]
             x0 = out if self.cfg.pred == "x0" else ac.sqrt() * z - (1 - ac).sqrt() * out
             if i == len(ts) - 1:
@@ -229,5 +285,28 @@ class Planner(nn.Module):
         if return_hidden:
             out["hidden"] = hidden
         if self.cfg.judge:
-            out.update(self.judge_out(mem))
+            out.update(judge if dit_judge else self.judge_out(mem))
         return out
+
+    @torch.no_grad()
+    def sample_vote(self, keyval, query_out, dec, k: int, m: int, tau: float = 0.5, n_steps: int = 10,
+                    z0: Optional[torch.Tensor] = None, generator=None, bev=None, obj=None) -> Dict[str, torch.Tensor]:
+        """시작 노이즈 k개로 한 배치에 샘플링하고 판단을 투표한다 (judge_from = dit, 14단계).
+
+        노이즈마다 REJECT = (p < tau). REJECT가 m개 이상이면 거부한다. 최종 경로는 최종 판단과 같은 판단을 낸 샘플 중
+        그 판단의 확신이 가장 큰 샘플의 경로이다(거부면 p가 가장 낮은 샘플, 아니면 p가 가장 높은 샘플). 그래서 출력에서
+        판단과 경로는 같은 샘플에서 나온다.
+        z0: (B, k, 8, 3) 시작 노이즈. 출력: poses (B, 8, 3), accept (B,) bool, n_reject (B,), p (B, k),
+        chosen (B,) 고른 샘플 번호, flag_logit / reason_logit (B,) / (B, 3) 고른 샘플의 값."""
+        assert self.cfg.judge and self.cfg.judge_from == "dit", "노이즈 투표는 DiT 내부에서 판단하는 모델에만 쓴다"
+        B = keyval.shape[0]
+        rep = lambda x: None if x is None else x.repeat_interleave(k, 0)  # noqa: E731
+        z = None if z0 is None else z0.reshape(B * k, N_POSES, POSE_DIM)
+        o = self.sample(rep(keyval), rep(query_out), rep(dec), n_steps, generator, z, rep(bev), rep(obj))
+        p = torch.sigmoid(o["flag_logit"]).reshape(B, k)
+        n_rej = (p < tau).sum(1)
+        accept = n_rej < m
+        chosen = torch.where(accept, p.argmax(1), p.argmin(1))
+        flat = torch.arange(B, device=p.device) * k + chosen
+        return {"poses": o["poses"][flat], "accept": accept, "n_reject": n_rej, "p": p, "chosen": chosen,
+                "flag_logit": o["flag_logit"][flat], "reason_logit": o["reason_logit"][flat]}

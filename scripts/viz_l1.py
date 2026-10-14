@@ -71,7 +71,7 @@ def draw(scene, out_dir: Path, tag: str = "", rng: float = 35.0) -> Path:
     ax.grid(alpha=0.3)
     ax.legend(loc="lower right", fontsize=8)
     lines = [f"{tag} {scene.scene_metadata.initial_token}  v0 {f['v0']:.1f} m/s",
-             f"L1: {dec}" + (f"  [{dec.reason}]" if dec.reason else "")]
+             dec.pretty("L1: ")]
     if f.get("valid"):
         for k in (1, 2):
             g = lambda n: f[f"seg{k}_{n}"]  # noqa: E731

@@ -32,6 +32,7 @@ from navsim.common.dataclasses import SensorConfig  # noqa: E402
 from navsim.visualization.bev import add_annotations_to_bev_ax, add_map_to_bev_ax  # noqa: E402
 from yesman.data import scene_loader  # noqa: E402
 from yesman.plot_style import use_korean_font  # noqa: E402
+from yesman.decision import decision_text  # noqa: E402
 
 ROOT = Path(os.environ["YESMAN_ROOT"])
 E = ROOT / "exp/eval"
@@ -91,7 +92,7 @@ def draw(scene, row, out: Path, title: str, rng=40.0):
     ax.set_ylim(-rng / 4, rng)
     ax.legend(loc="lower right", fontsize=9)
     flag = "ACCEPT" if row["accept"] else "REJECT"
-    fig.suptitle(f"{title}  [{row['token']} / {row['cf_name']}]\n결정: {row['decision']}   Ours: {flag} (p = {row['p']:.4f})"
+    fig.suptitle(f"{title}  [{row['token']} / {row['cf_name']}]\n{decision_text(row, '결정: ')}\nOurs: {flag} (p = {row['p']:.4f})"
                  f"   결정대로 그림: B2 {'O' if row['follow_B2'] else 'X'}, B-순응 {'O' if row['follow_B-순응'] else 'X'}, "
                  f"Ours {'O' if row['follow_Ours'] else 'X'}", fontsize=11)
     out.parent.mkdir(parents=True, exist_ok=True)
