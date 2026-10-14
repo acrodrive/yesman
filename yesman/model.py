@@ -8,7 +8,7 @@
   self-attention(waypoint끼리)과 cross-attention(장면 토큰 + 결정 토큰)을 거쳐 깨끗한 경로(x0)를 예측한다.
 - M3 판단 (judge_from으로 고른다). flag head: 실행 가능 logit 하나 (p = sigmoid, 1 = ACCEPT).
   근거 head: 충돌 / 도로 이탈 / 역주행 logit (여러 개일 수 있음).
-  - token (B4, 기존 Ours): 학습되는 쿼리 하나가 장면 토큰 + 결정 토큰에만 cross-attention한다(따로 된 디코더, DiT와 병렬).
+  - token (이전 Ours, 기존 Ours): 학습되는 쿼리 하나가 장면 토큰 + 결정 토큰에만 cross-attention한다(따로 된 디코더, DiT와 병렬).
     노이즈를 걷어 내는 도중의 경로는 구조적으로 보지 않으므로, 시작 노이즈가 달라도 flag가 바뀌지 않는다.
   - dit (새 Ours, 14단계): 경로 디코더(DiT)의 judge_layer번째 층 출력에서 waypoint 8개의 표현을 펼쳐 2층 MLP로 판단한다.
     DiT는 한 번만 돌고, 최종 경로는 그 DiT의 출력이다. 샘플링에서는 노이즈 제거 마지막 단계의 표현을 쓴다. 학습에서는
@@ -47,8 +47,8 @@ class ModelConfig:
     feat_dim: int = 256  # LTF 토큰 차원
     use_query_out: bool = True  # 장면 토큰에 LTF 디코더 출력(31개)을 더한다
     use_decision: bool = True  # False: B1 (결정을 보지 않는다)
-    judge: bool = False  # True: 판단 head를 쓴다 (B4, Ours)
-    judge_from: str = "token"  # token: DiT와 병렬인 판단 토큰 (B4) / dit: DiT 내부 표현에서 분기 (새 Ours, 14단계)
+    judge: bool = False  # True: 판단 head를 쓴다 (이전 Ours, Ours)
+    judge_from: str = "token"  # token: DiT와 병렬인 판단 토큰 (이전 Ours) / dit: DiT 내부 표현에서 분기 (새 Ours, 14단계)
     judge_layer: int = 0  # dit: 판단을 읽을 경로 디코더 층 (1..n_layers, 0 = 마지막 층. 마지막 층은 최종 LayerNorm 뒤)
     judge_t_max: int = 100  # dit: 판단 손실을 계산할 노이즈 단계의 상한 (t는 0..judge_t_max-1에서 뽑는다)
     judge_detach: bool = False  # dit: 판단 손실의 기울기를 DiT로 보내지 않는다 (DiT를 고정하고 head만 학습할 때)
@@ -199,7 +199,7 @@ class Planner(nn.Module):
         return (self.pose_out(h), tap) if return_hidden else self.pose_out(h)
 
     def judge_out(self, mem) -> Dict[str, torch.Tensor]:
-        """판단 토큰 (judge_from = token, B4)."""
+        """판단 토큰 (judge_from = token, 이전 Ours)."""
         h = self.judge_dec(self.judge_query.expand(mem.shape[0], -1, -1), mem)[:, 0]
         return {"flag_logit": self.flag_head(h)[:, 0], "reason_logit": self.reason_head(h)}
 

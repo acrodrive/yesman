@@ -15,8 +15,12 @@
   auc_all      전체 AUC (보조)
   vote_flip    투표 모델: 노이즈마다 판단이 갈린 결정의 비율, 그리고 갈린 결정과 만장일치 결정의 L2 통과 후보 비율(경계 정도)
 비교: 짝지은 차이 = 같은 결정 위에서 (시드 평균한 결정별 값)의 차이, 결정 단위로 5,000번 다시 뽑은 95% 구간.
+주 비교의 Ours는 노이즈 1개이다. 성공 판정(7.1절)은 비교마다 따로 하고, 여러 번 비교한 보정은 하지 않는다.
+  Ours − B2 safe > 0, Ours − B3 safe > −5%p, Ours − B3 follow > −2%p (구간의 아래끝),
+  Ours − OursPrev flag–경로 불일치 < 0 (구간의 위끝). 구간이 기준선에 걸치면 "결론 없음".
+OursPrev = 이전 Ours (기존 Ours, 판단 head가 DiT와 병렬. 사다리 밖의 ablation, Ours가 고른 CF 학습 구성으로 학습)
 
-사용법: python scripts/step14_eval.py --models B0=B1_s14 B1=B2_s14 B2=Bcomply_s14 B3=B3_s14 B4=Ours_s14 Ours=OursDiT_s14 \\
+사용법: python scripts/step14_eval.py --models B0=B1_s14 B1=B2_s14 B2=Bcomply_s14 B3=B3_s14 OursPrev=Ours_s14 Ours=OursDiT_s14 \\
             --vote Ours=vote10_3 --out logs/step14/eval.md
 """
 
@@ -34,7 +38,10 @@ EXP = Path(os.environ["NAVSIM_EXP_ROOT"])
 SAFE = ["no_at_fault_collisions", "drivable_area_compliance", "driving_direction_compliance"]
 SEEDS = (0, 1)
 COMPARE = [("Ours", "B2", "safe"), ("Ours", "B3", "safe"), ("Ours", "B3", "follow"),
-           ("Ours", "B4", "flag_path_mismatch"), ("Ours", "B4", "auc_kind")]
+           ("Ours", "OursPrev", "flag_path_mismatch"), ("Ours", "OursPrev", "auc_kind")]
+# 성공 기준 (7.1절): (a, b, col) → (구간의 어느 끝, 기준선). lo: 아래끝 > 기준선, hi: 위끝 < 기준선
+SUCCESS = {("Ours", "B2", "safe"): ("lo", 0.0), ("Ours", "B3", "safe"): ("lo", -0.05),
+           ("Ours", "B3", "follow"): ("lo", -0.02), ("Ours", "OursPrev", "flag_path_mismatch"): ("hi", 0.0)}
 
 
 def auc(score, label):
@@ -142,7 +149,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", nargs="+", required=True, help="문서이름=코드 실행 이름 앞부분 (뒤에 _seed0, _seed1)")
     ap.add_argument("--vote", nargs="*", default=[], help="문서이름=vote<K>_<M> (노이즈 투표 결과로 평가)")
-    ap.add_argument("--judge", nargs="*", default=["B4", "Ours"], help="판단 head가 있는 모델")
+    ap.add_argument("--judge", nargs="*", default=["OursPrev", "Ours"], help="판단 head가 있는 모델")
     ap.add_argument("--sets", nargs="+", default=["T0", "T1", "T2", "T3_gemma31b"])
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
@@ -160,6 +167,7 @@ def main():
             if "Ours" in votes else COMPARE:
         if a not in PD or b not in PD:
             continue
+        crit = SUCCESS.get((a, b, col))
         if col in ("safe",):
             s = "T3_gemma31b" if "T3_gemma31b" in args.sets else "T2"
             pa, pb = infeasible_rows(PD[a], s), infeasible_rows(PD[b], s)
@@ -172,7 +180,14 @@ def main():
             lines.append(f"- {a} vs {b} {col}: {R[a].get(col, np.nan):.4f} vs {R[b].get(col, np.nan):.4f}")
             continue
         mean, lo, hi, n = paired(pa, pb, col)
-        lines.append(f"- {a} − {b} {col}: {mean:+.4f} [{lo:+.4f}, {hi:+.4f}] (n = {n:,})")
+        verdict = ""
+        if crit:
+            end, line = crit
+            ok = lo > line if end == "lo" else hi < line
+            over = hi < line if end == "lo" else lo > line  # 구간 전체가 기준선의 반대쪽
+            verdict = f" → 기준 {'아래끝 >' if end == 'lo' else '위끝 <'} {line:+.2f}: " + \
+                ("성공" if ok else "실패" if over else "결론 없음")
+        lines.append(f"- {a} − {b} {col}: {mean:+.4f} [{lo:+.4f}, {hi:+.4f}] (n = {n:,}){verdict}")
     text = "\n".join(lines) + "\n"
     print(text)
     if args.out:

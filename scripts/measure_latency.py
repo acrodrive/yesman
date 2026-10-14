@@ -2,7 +2,7 @@
 
 장면 하나(batch 1)를 넣었을 때 경로 + 판단을 내는 시간을 잰다. 장면 특징(LTF)은 미리 계산한 값과 같은 모양의 무작위 텐서를
 쓴다(지연은 값과 무관하다). LTF 인코더 자체의 지연은 --ltf로 따로 잰다(카메라 3장 + 차량 상태, 무작위 입력).
-  sample        노이즈 1개 (B0~B4, Ours 노이즈 1개)
+  sample        노이즈 1개 (B0~B3, 이전 Ours, Ours 노이즈 1개)
   vote K        노이즈 K개를 한 batch로 (Ours 노이즈 투표, Planner.sample_vote)
 GPU에서는 torch.cuda.synchronize로 끝을 맞추고, 준비 실행(warmup) 뒤 반복 실행의 중앙값과 p95를 낸다.
 

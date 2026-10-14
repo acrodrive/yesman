@@ -7,7 +7,7 @@
   Ours    결정 입력, 원래 결정 + CF⁺ + CF⁻, 판단 head
   B3      결정 입력, 원래 결정 + CF⁺ + CF⁻, 판단 head 없음 (12단계)
   OursDiT 결정 입력, 원래 결정 + CF⁺ + CF⁻, 판단 head를 DiT 내부 표현에서 분기 (14단계의 새 Ours.
-          문서 이름은 Ours이고, 기존 Ours는 문서에서 B4이다. docs/step14_preregistration.md)
+          문서 이름은 Ours이고, 기존 Ours는 문서에서 "이전 Ours"(ablation)이다. docs/step14_preregistration.md)
 
 사용법
   python scripts/train_planner.py --model Bcomply --overfit_scenes 100 --steps 3000 --name step08_overfit_Bcomply
@@ -77,7 +77,7 @@ def evaluate(model, feats, s, seeds=(0, 1, 2), n_steps=10, bs=1024):
         if m.any():
             res[st] = {"n": int(m.sum()), "ade": float(ade[:, m].mean()), "fde": float(fde[:, m].mean()),
                        "ade_p95": float(ade[:, m].quantile(0.95)), "seed_spread": float(spread[:, m].mean())}
-    if flags:  # 판단 head: p = sigmoid(flag_logit), 1 = ACCEPT. 판단 토큰(B4)은 노이즈와 무관하다. DiT 내부에서 판단하면
+    if flags:  # 판단 head: p = sigmoid(flag_logit), 1 = ACCEPT. 판단 토큰(이전 Ours)은 노이즈와 무관하다. DiT 내부에서 판단하면
         # 노이즈마다 다를 수 있으나, 학습 중 확인에는 첫 seed의 판단만 쓴다(투표는 predict_planner.py --vote_k)
         p = torch.sigmoid(torch.cat(flags))
         res["judge"] = judge_metrics(p, s.flag, s.stype)
