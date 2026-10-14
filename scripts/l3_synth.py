@@ -28,6 +28,7 @@ from yesman.synth import candidates, matching
 EXP = Path(os.environ["NAVSIM_EXP_ROOT"])
 SAFE = ["no_at_fault_collisions", "drivable_area_compliance", "driving_direction_compliance"]
 _S, _TH = None, None
+CACHE = "navtrain_sensor"  # --cache로 바꾼다 (14단계: 기존 + 학습 추가 장면 목록 navtrain_step14_train)
 
 
 def _init():
@@ -41,7 +42,7 @@ def dec(r):
 
 def run_log(args):
     log, rows, originals = args
-    mcl = MetricCacheLoader(EXP / "metric_cache/navtrain_sensor")
+    mcl = MetricCacheLoader(EXP / f"metric_cache/{CACHE}")
     loader = scene_loader("navtrain", [log], sorted({r["token"] for r in rows}))
     out, cur = [], {}
     for r in rows:
@@ -83,7 +84,10 @@ def main():
     ap.add_argument("--max_logs", type=int, default=0, help="시험용: 작은 로그 N개만 (저장하지 않는다)")
     ap.add_argument("--input", type=Path, default=None, help="12단계 A: 이 묶음의 target_rule == new_l2best인 CF⁺만 합성한다")
     ap.add_argument("--out", type=Path, default=None)
+    ap.add_argument("--cache", default="navtrain_sensor", help="metric cache 폴더 이름")
     args = ap.parse_args()
+    global CACHE
+    CACHE = args.cache
     df = pd.read_parquet(args.input or EXP / f"l3/train_bundle_{args.bundle}_retarget.parquet")
     df["i"] = np.arange(len(df))
     cols = ["i", "token", "cf_name"] + [c for c in df.columns if c.startswith("d_seg")]

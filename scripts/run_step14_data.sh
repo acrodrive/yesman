@@ -3,12 +3,16 @@
 #   bash scripts/run_step14_data.sh download shards cache features testcf vlm freeze traincf bundle plaus
 # download   남은 navtrain 카메라 24조각 (scripts/data/download_navsim.sh, 조각마다 _done 표시로 이어 받기)
 # shards     용도별 장면 목록 (data_lists/step14/). EXTRA_VAL_FRAC 환경 변수로 학습 추가 로그의 검증 비율(기본 0.1, step14 문서 2.1절)
-# cache      metric cache: 학습 추가 → navtrain_sensor에 더함, 테스트 → navtrain_step14_test, 예비 → navtrain_step14_reserve
+# cache      metric cache (cache_test, cache_train, cache_reserve를 차례로): 테스트 → navtrain_step14_test,
+#            학습 추가 → navtrain_step14_extra, 예비 → navtrain_step14_reserve. 학습 + 검증 장면 전체는 목록만 합친
+#            navtrain_step14_train(metadata csv만 있음, 파일 경로는 절대 경로)으로 읽는다. MetricCacheLoader는 metadata/의
+#            첫 csv만 읽고 caching은 그 csv를 새 장면만으로 덮어쓰므로, 기존 navtrain_sensor 폴더에 더하면 기존 장면이 빠진다
 # features   LTF 특징 (GPU). 카메라가 있는 navtrain 장면 전부를 navtrain_step14로 만든 뒤 navtrain과 바꿔 끼운다
 # testcf     테스트 장면의 원래 결정 + 규칙 기반 CF 메뉴 전부를 L2로 판정 → T0~T2  (모델 결과는 보지 않는다)
 # vlm        테스트 장면 전부에 Gemma 4 31B (GPU, VLM 환경 /root/vlm) → L2 판정 → T3_gemma31b
 # freeze     T0~T3 체크섬과 README (이후 바꾸지 않는다)
 # traincf    학습 + 검증 장면: 규칙 기반 CF 메뉴 전부, 확장된 규칙 기반 CF, plausible CF (모두 L2 판정)
+#            (traincf_menu, traincf_wide, traincf_plausible을 차례로)
 # bundle     학습 묶음 (CF⁺ target = 사람 경로를 고친 경로, 실패하면 사람 경로에 가장 가까운 후보) → train_bundle_{train,val}_step14
 # plaus      그럴싸함 점수를 붙인 묶음 → train_bundle_{train,val}_step14_plaus
 set -uo pipefail
@@ -33,14 +37,25 @@ for stage in "$@"; do
     step shards
     python scripts/step14_shards.py --extra_val_frac ${EXTRA_VAL_FRAC:-0.1} 2>&1 | tee $L/shards.log | grep -v Warn ;;
   cache)
-    step cache
-    python scripts/run_metric_caching_tokens.py --split navtrain --tokens $S/train_extra_tokens.txt \
-      --out exp/metric_cache/navtrain_sensor --workers 16 > $L/cache_train_extra.log 2>&1
+    bash $0 cache_test cache_train cache_reserve ;;
+  cache_test)
+    step cache_test
     python scripts/run_metric_caching_tokens.py --split navtrain --tokens $S/test_tokens.txt \
-      --out exp/metric_cache/navtrain_step14_test --workers 16 > $L/cache_test.log 2>&1
+      --out exp/metric_cache/navtrain_step14_test --workers ${CACHE_WORKERS:-16} > $L/cache_test.log 2>&1 ;;
+  cache_train)
+    step cache_train
+    python scripts/run_metric_caching_tokens.py --split navtrain --tokens $S/train_extra_tokens.txt \
+      --out exp/metric_cache/navtrain_step14_extra --workers ${CACHE_WORKERS:-16} > $L/cache_train_extra.log 2>&1
+    # 기존 학습 장면 + 학습 추가 장면을 함께 읽는 목록 (파일은 옮기지 않는다)
+    M=exp/metric_cache/navtrain_step14_train/metadata; mkdir -p $M
+    { echo file_name; tail -n +2 -q exp/metric_cache/navtrain_sensor/metadata/navtrain_sensor_metadata_node_0.csv \
+        exp/metric_cache/navtrain_step14_extra/metadata/navtrain_step14_extra_metadata_node_0.csv; } \
+      > $M/navtrain_step14_train_metadata_node_0.csv
+    echo "navtrain_step14_train: $(( $(wc -l < $M/navtrain_step14_train_metadata_node_0.csv) - 1 )) 장면" ;;
+  cache_reserve)
+    step cache_reserve
     python scripts/run_metric_caching_tokens.py --split navtrain --tokens $S/reserve_tokens.txt \
-      --out exp/metric_cache/navtrain_step14_reserve --workers 16 > $L/cache_reserve.log 2>&1
-    tail -2 $L/cache_*.log ;;
+      --out exp/metric_cache/navtrain_step14_reserve --workers ${CACHE_WORKERS:-16} > $L/cache_reserve.log 2>&1 ;;
   features)
     step features
     python scripts/ltf_features.py --split navtrain --tokens $S/camera_all_tokens.txt --logs $S/camera_all_logs.txt \
@@ -70,12 +85,18 @@ for stage in "$@"; do
     step freeze
     python scripts/step14_testset.py --stage freeze ;;
   traincf)
-    step traincf
-    python scripts/l3_run.py --split navtrain --cache navtrain_sensor --tokens $S/train_all_tokens.txt --skip_original \
-      --workers $W --name step14_train_cf 2>&1 | grep -v -E "Warn|Loading" | tee $L/traincf_menu.log | tail -15
-    python scripts/l3_run.py --split navtrain --cache navtrain_sensor --tokens $S/train_all_tokens.txt --skip_original \
-      --wide --workers $W --name step14_train_cf_wide 2>&1 | grep -v -E "Warn|Loading" | tee $L/traincf_wide.log | tail -15
-    python scripts/l3_plausible.py --targets $S/train_all_tokens.txt --pool $S/train_all_tokens.txt --cache navtrain_sensor \
+    bash $0 traincf_menu traincf_wide traincf_plausible ;;
+  traincf_menu)
+    step traincf_menu
+    python scripts/l3_run.py --split navtrain --cache navtrain_step14_train --tokens $S/train_all_tokens.txt --skip_original \
+      --workers $W --name step14_train_cf 2>&1 | grep -v -E "Warn|Loading" | tee $L/traincf_menu.log | tail -15 ;;
+  traincf_wide)
+    step traincf_wide
+    python scripts/l3_run.py --split navtrain --cache navtrain_step14_train --tokens $S/train_all_tokens.txt --skip_original \
+      --wide --workers $W --name step14_train_cf_wide 2>&1 | grep -v -E "Warn|Loading" | tee $L/traincf_wide.log | tail -15 ;;
+  traincf_plausible)
+    step traincf_plausible
+    python scripts/l3_plausible.py --targets $S/train_all_tokens.txt --pool $S/train_all_tokens.txt --cache navtrain_step14_train \
       --workers $W --out exp/l3/step14_train_cf_plausible.parquet 2>&1 | grep -v -E "Warn|Loading" \
       | tee $L/traincf_plausible.log | tail -15 ;;
   bundle)
@@ -83,7 +104,7 @@ for stage in "$@"; do
     python scripts/step14_bundle.py 2>&1 | grep -v Warn | tee $L/bundle.log
     for b in train val; do
       python scripts/l3_synth.py --bundle $b --input exp/l3/step14_bundle_${b}_raw.parquet \
-        --out exp/l3/train_bundle_${b}_step14.parquet --workers $W 2>&1 | grep -v -E "Warn|Loading" | tee -a $L/synth.log | tail -5
+        --out exp/l3/train_bundle_${b}_step14.parquet --cache navtrain_step14_train --workers $W 2>&1 | grep -v -E "Warn|Loading" | tee -a $L/synth.log | tail -5
     done ;;
   plaus)
     step plaus
