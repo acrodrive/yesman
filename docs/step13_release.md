@@ -13,10 +13,10 @@ yesman.md 11절 13단계의 결과이다.
 
 ## 최종 모델 (보고서와 README의 숫자)
 
-B1_seed{0,1}, B2_seed{0,1}, Bcomply_syn_seed{0,1}, B3_syn_seed{0,1}, Ours_syn_seed{0,1}. CF⁺ 목표는 합성 경로(12단계), CF⁻ 무게 0.25(10단계), 2만 step. 표: `logs/step13/tables.md`(D0~D2), `logs/step13/tables_step12.md`(VLM 3개), `logs/step12/d3x_safety_synth.md`(실제 VLM 결정의 결과 안전). 그림: `docs/figs/step13/`.
+B1_seed{0,1}, B2_seed{0,1}, Bcomply_syn_seed{0,1}, B3_syn_seed{0,1}, Ours_syn_seed{0,1}. CF⁺ 목표는 합성 경로(12단계), CF⁻ 무게 0.25(10단계), 2만 step. 표: `logs/step13/tables.md`(D0~D2), `logs/step13/tables_step12.md`(VLM 3개), `logs/step12/d3x_safety_synth.md`(실제 VLM 결정의 불가능한 결정의 안전율). 그림: `docs/figs/step13/`.
 
 ## 보고서에서 정한 것
 
-- 주장 구성(12단계에서 사용자와 정함): (1) CF⁺만으로는 안전이 늘지 않는다, (2) 안전은 CF⁻ 학습에서 오고 판단 head와 무관하다, (3) 순응을 강화해도 맹목적 추종은 늘지 않았다(사전 가설 기각), (4) 합성한 틀린 결정에서 잰 효과는 실제 VLM 결정에서 절반 이하로 줄어든다. 3~4와 결과 안전 지표는 사후 분석임을 밝혔다.
+- 주장 구성(12단계에서 사용자와 정함): (1) CF⁺만으로는 안전이 늘지 않는다, (2) 안전은 CF⁻ 학습에서 오고 판단 head와 무관하다, (3) 순응을 강화해도 맹목적 추종은 늘지 않았다(사전 가설 기각), (4) 규칙 기반 CF⁻에서 잰 효과는 실제 VLM 결정에서 절반 이하로 줄어든다. 3~4와 불가능한 결정의 안전율 지표는 사후 분석임을 밝혔다.
 - 관련 연구 중 원문을 확인하지 못한 2026년 논문(Senna-2, ICR-Drive, ReasonBreak 등)은 "원문 확인 필요"로 남겼다. 공개 전에 확인해야 한다.
 - 분량: 표가 많아 계획서의 4~6쪽보다 조금 길다(약 7쪽).

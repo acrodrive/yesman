@@ -4,29 +4,29 @@ VLM이 틀린 주행 결정을 내릴 때, 그 결정을 받는 planner는 어�
 
 ![Figure 1](docs/figs/step13/fig1_follow_reject.png)
 
-*따르기–거부 평면(불가능 기준별). 가로축: 실행할 수 있는 결정을 결정대로 따른 비율. 세로축: 실행할 수 없는 결정을 그대로 실행하지 않은 비율. 오른쪽 위가 바람직하다.*
+*결정–경로 일치율–거부율 평면(불가능 기준별). 가로축: 실행할 수 있는 결정을 결정대로 따른 비율. 세로축: 실행할 수 없는 결정을 그대로 실행하지 않은 비율. 오른쪽 위가 바람직하다.*
 
 ## 주요 결과 (navtest, 시드 2개 평균)
 
-| 모델 | 실행 가능한 결정 따르기 (D1) | 실행할 수 없는 결정에서 결과 안전 (D2, 합성) | 같은 지표, 실제 VLM 결정 (Gemma 4 12B / 31B / Qwen3-VL 8B) | 주행 점수 (D0 EPDMS) |
+| 모델 | 실행 가능한 결정–경로 일치율 (D1) | 불가능한 결정의 안전율 (D2, 규칙 기반 CF⁻) | 같은 지표, 실제 VLM 결정 (Gemma 4 12B / 31B / Qwen3-VL 8B) | 주행 점수 (D0 EPDMS) |
 | --- | --- | --- | --- | --- |
 | B1 (결정을 보지 않음) | 4.5% | 85.7% | 80 / 76 / 78% | 0.845 |
 | B2 (결정 조건, 사람 결정만 학습) | 35.4% | 22.1% | 12 / 13 / 14% | 0.879 |
-| B-순응 (+ 실행 가능한 바꾼 결정) | **69.5%** | 24.0% | 17 / 14 / 21% | 0.862 |
-| B3 (+ 실행할 수 없는 바꾼 결정) | 65.7% | 76.9% | 34 / 30 / 42% | 0.862 |
+| B-순응 (+ CF⁺) | **69.5%** | 24.0% | 17 / 14 / 21% | 0.862 |
+| B3 (+ CF⁻) | 65.7% | 76.9% | 34 / 30 / 42% | 0.862 |
 | Ours (B3 + 판단 head) | 63.2% | **77.2%** | 37 / 36 / 43% | 0.862 |
 
 1. 결정을 더 잘 따르게 학습해도 실행할 수 없는 결정을 더 따르지는 않았고(사전 가설 기각), 안전해지지도 않았다(B2 22% → B-순응 24%).
 2. 안전은 실행할 수 없는 결정의 예를 학습에 넣을 때 생기며(약 3배), 판단 head와는 무관하다(B3 ≈ Ours). head는 거부 표시와 근거를 더한다.
-3. 합성한 틀린 결정에서 잰 효과는 실제 VLM의 틀린 결정에서 절반 이하로 줄어든다. 실제 VLM의 오답은 그럴싸하지만 움직임 때문에 틀리는 결정(앞차가 감속하는데 속도 유지)이 많다.
-4. VLM을 쓰지 않고 만든 그럴싸한 틀린 결정(비슷해 보이는 장면이나 조금 전의 사람 결정)으로 학습하면, 학습에 쓰지 않은 VLM 3개 중 2개에서 결과 안전이 12~13%p 오른다(사후 분석).
+3. 규칙 기반 CF⁻에서 잰 효과는 실제 VLM의 틀린 결정에서 절반 이하로 줄어든다. 실제 VLM의 오답은 그럴싸하지만 움직임 때문에 틀리는 결정(앞차가 감속하는데 속도 유지)이 많다.
+4. VLM을 쓰지 않고 만든 plausible CF⁻(비슷해 보이는 장면이나 조금 전의 사람 결정)으로 학습하면, 학습에 쓰지 않은 VLM 3개 중 2개에서 불가능한 결정의 안전율이 12~13%p 오른다(사후 분석).
 5. 경로와 따로 된 판단 head는 그럴싸한 오답에서 DiT의 행동과 어긋난 판단을 낸다. 판단을 DiT가 경로를 내기 직전의 표현에서 읽으면 더 잘 가른다(Gemma 4 31B 오답 AUC 0.67 → 0.80, 사후 분석).
 
 ## 저장소 구성
 
 | 경로 | 내용 |
 | --- | --- |
-| `yesman/` | 패키지: 결정 형식(`decision.py`), L1 라벨러(`l1.py`), L2 실행 가능 판정(`l2.py`), L3 counterfactual(`l3.py`), 목표 경로 합성(`synth.py`), planner(`model.py`), 학습 데이터(`train_data.py`), 채점(`scoring.py`) |
+| `yesman/` | 패키지: 결정 형식(`decision.py`), L1 라벨러(`l1.py`), L2 실행 가능 판정(`l2.py`), L3 counterfactual(`l3.py`), target 경로 합성(`synth.py`), planner(`model.py`), 학습 데이터(`train_data.py`), 채점(`scoring.py`) |
 | `scripts/` | 단계별 실행 스크립트 (아래) |
 | `data_lists/eval/` | 고정한 평가 세트 D0~D3, D3x(VLM 3개), `SHA256SUMS` |
 | `docs/stepNN_*.md` | 단계별 결과와 계획서와 달라진 점 |
@@ -97,9 +97,9 @@ done
 ```bash
 r=Ours_syn_seed0                                                    # 모델마다
 python scripts/predict_planner.py --run $r                          # D0~D3, 검증 세트 경로
-python scripts/follow_eval.py --run $r --sets D0 D1 D2 D3 val       # L1 따르기 판정
+python scripts/follow_eval.py --run $r --sets D0 D1 D2 D3 val       # L1 결정–경로 일치율 판정
 python scripts/score_planner.py --run $r                            # D0 공식 EPDMS
-python scripts/score_rows.py --table exp/eval/$r/D2.parquet         # D2 결과 안전
+python scripts/score_rows.py --table exp/eval/$r/D2.parquet         # D2 불가능한 결정의 안전율
 python scripts/flag_threshold.py --run $r                           # Ours: 검증 세트로 기준값
 python scripts/predict_rule.py --run $r && python scripts/score_rows.py --table exp/eval/$r/D2_rule.parquet   # 규칙 대체
 python scripts/analyze_step11.py --final && python scripts/viz_step11.py --final    # 표, Figure 1~3
@@ -117,9 +117,9 @@ python scripts/analyze_step12.py --final && python scripts/analyze_step12_d3safe
 | 7. 특징과 VLM 결정(D3) | [step07](docs/step07_features_vlm.md) |
 | 8. 디코더 | [step08](docs/step08_decoder.md) |
 | 9. 비교 모델 | [step09](docs/step09_baselines.md) |
-| 10. 제안 방법, 언행 불일치 원인 시험 | [step10](docs/step10_ours.md), [step10b](docs/step10b_decoder.md) |
+| 10. 제안 방법, flag–경로 불일치 원인 시험 | [step10](docs/step10_ours.md), [step10b](docs/step10b_decoder.md) |
 | 11. 평가와 분석 | [step11](docs/step11_eval.md) |
-| 12. 추가 실험(B3, VLM 3개, 목표 합성, 넓힌 CF, 물체 정보, 그럴싸한 CF⁻, probe) | [step12](docs/step12_extra.md) |
+| 12. 추가 실험(B3, VLM 3개, 목표 합성, 넓힌 CF, 물체 정보, plausible CF⁻, probe) | [step12](docs/step12_extra.md) |
 
 ## 라이선스와 출처
 
