@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 12단계 C: 그럴싸한 CF⁻ 생성(CPU) → 학습 묶음(합성 묶음 + 그럴싸한 CF⁻) → Ours x 시드 2 (CF⁻ 안에서 그럴싸한 것 85%) → 평가.
+# 12단계 C: plausible CF⁻ 생성(CPU) → 학습 묶음(합성 묶음 + plausible CF⁻) → Ours x 시드 2 (CF⁻ 안에서 그럴싸한 것 85%) → 평가.
 # 아키텍처와 나머지 설정은 최종 Ours(Ours_syn)와 같다. 비교 기준은 Ours_syn.
 set -uo pipefail
 source /workspace/yesman/scripts/setup/env.sh

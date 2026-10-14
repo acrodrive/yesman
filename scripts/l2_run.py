@@ -2,8 +2,8 @@
 
 --decisions original: 사람의 원래 결정 (L1 라벨). 구조적 애매함이 있는 장면은 뺀다.
 --decisions probe: L2 확인용으로 일부러 바꾼 결정 4가지 (6단계 counterfactual의 맛보기)
-    lc_left / lc_right: 구간 1 offset(세기 0.6) → 구간 2 차선 변경(세기 0.5). 앞뒤 행동은 원래대로
-    turn_left: 두 구간 모두 좌회전(세기 0.6). 앞뒤 행동은 원래대로
+    lc_left / lc_right: 구간 1 offset(강도 0.6) → 구간 2 차로 변경(강도 0.5). 앞뒤 행동은 원래대로
+    turn_left: 두 구간 모두 좌회전(강도 0.6). 앞뒤 행동은 원래대로
     go_fast: 두 구간 모두 go 0.9. 좌우 행동은 원래대로
 
 출력: exp/l2/<split>_<decisions>.parquet (장면 x 결정마다 한 줄: 판정, 판단 근거, 후보 수, 최고 후보 행 번호 등)
@@ -36,8 +36,8 @@ def probes(d: Decision):
     s1, s2 = d.segments
     out = {}
     for side in ("left", "right"):
-        # 차선 중앙에서 시작하는 사람의 차선 변경에서 가장 흔한 모양: 구간 1 offset(세기 0.6) → 구간 2 차선 변경(0.5)
-        # (5단계 첫 버전의 "구간 1 안에 차선 변경 0.5 완료"는 차선 중앙에서 출발하면 물리적으로 맞지 않았다)
+        # 차로 중앙에서 시작하는 사람의 차로 변경에서 가장 흔한 모양: 구간 1 offset(강도 0.6) → 구간 2 차로 변경(0.5)
+        # (5단계 첫 버전의 "구간 1 안에 차로 변경 0.5 완료"는 차로 중앙에서 출발하면 물리적으로 맞지 않았다)
         out[f"lc_{side}"] = Decision([Segment(s1.lon, s1.lon_strength, f"offset_{side}", 0.6),
                                       Segment(s2.lon, s2.lon_strength, f"lane_change_{side}", 0.5)])
     out["turn_left"] = Decision([Segment(s.lon, s.lon_strength, "turn_left", 0.6) for s in (s1, s2)])

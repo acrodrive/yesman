@@ -1,4 +1,4 @@
-"""12단계 A: 넓힌 CF(W)와 실제 VLM 결정(V)으로 학습 묶음 변형을 만든다.
+"""12단계 A: 확장된 규칙 기반 CF(W)와 실제 VLM 결정(V)으로 학습 묶음 변형을 만든다.
 
 입력
 - 기존 묶음: exp/l3/train_bundle_{train,val}_synth.parquet (CF⁺ 목표 합성, 최종 모델과 같음)
@@ -11,7 +11,7 @@
   python scripts/l3_build_extra.py --stage extra    # 새 행만 모은 묶음 (+ 합성에 필요한 원래 결정 행) → exp/l3/extra_{train,val}.parquet
   python scripts/l3_synth.py --input exp/l3/extra_train.parquet --out exp/l3/extra_train_synth.parquet  (val도)
   python scripts/l3_build_extra.py --stage variants  # → exp/l3/train_bundle_{train,val}_{W,V,WV}.parquet
-12단계 C: python scripts/l3_build_extra.py --stage plausible  # 합성 묶음 + 그럴싸한 CF⁻(scripts/l3_plausible.py, 불가능만)
+12단계 C: python scripts/l3_build_extra.py --stage plausible  # 합성 묶음 + plausible CF⁻(scripts/l3_plausible.py, 불가능만)
   → exp/l3/train_bundle_{train,val}_plaus.parquet (source = plausible)
 """
 

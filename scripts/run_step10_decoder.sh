@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 10단계 디코더 시험: B-순응 시드 0, 2만 step, 검증 세트로만 판단 (navtest는 보지 않는다).
-# 고르는 규칙 (결과를 보기 전에 정함): 검증 CF⁺ 따르기가 기존(x0 + L1, 0.620)보다 3%p 이상 오르고
-# 원래 결정 따르기(0.955)가 1%p 넘게 떨어지지 않는 설정 중 가장 좋은 것.
+# 고르는 규칙 (결과를 보기 전에 정함): 검증 CF⁺ 결정–경로 일치율이 기존(x0 + L1, 0.620)보다 3%p 이상 오르고
+# 원래 결정의 결정–경로 일치율(0.955)이 1%p 넘게 떨어지지 않는 설정 중 가장 좋은 것.
 set -uo pipefail
 source /workspace/yesman/scripts/setup/env.sh
 cd /workspace/yesman

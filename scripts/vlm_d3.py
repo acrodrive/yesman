@@ -54,7 +54,7 @@ SCHEMA = {
     "additionalProperties": False,
 }
 
-# 세기의 뜻은 L1(yesman/l1.py, l1_thresholds.yaml)의 정의와 같다. 6.1의 형식.
+# 강도의 뜻은 L1(yesman/l1.py, l1_thresholds.yaml)의 정의와 같다. 6.1의 형식.
 SYSTEM = """You are the driving-decision module of an autonomous car. You look at the car's three front cameras and decide the maneuver for the next 4 seconds. A separate motion planner will turn your decision into a trajectory.
 
 Work in three stages:

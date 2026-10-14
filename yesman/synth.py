@@ -1,14 +1,14 @@
-"""12단계: CF⁺ 학습 목표 경로 합성 — 다른 장면의 경로를 옮겨 오는 대신, 이 장면 사람의 실제 경로를 결정에 맞게 고친다.
+"""12단계: CF⁺ 학습 target 경로 합성 — 다른 장면의 경로를 옮겨 오는 대신, 이 장면 사람의 실제 경로를 결정에 맞게 고친다.
 
 원칙: 결정이 바꾸는 부분만 고치고 나머지는 사람 경로 그대로 둔다("결정을 만족하는 가장 작은 변경").
 - 앞뒤 CF(faster, slower, stop): 사람 경로의 모양(지나간 길)은 그대로 두고 속도만 바꾼다. 구간마다 끝 속도를
-  결정의 세기에 맞추고(go: 세기 x v_max, stop: 0) 구간 안에서는 등가속으로 잇는다. 사람 경로보다 길어지면
-  마지막 방향으로 곧게 늘인다. 사람이 거의 서 있었으면(4초 동안 2 m 미만) 기준 차선을 따라 그린다.
-- 좌우 CF(keep, offset, lane change): 사람의 속도(점 사이 이동 거리)는 그대로 두고, 이 장면의 기준 차선
-  (L1 lane_reference) 위에 옆 거리 곡선을 새로 그린다. offset: 그 구간 동안 세기 x offset_max만큼 부드럽게
-  (smoothstep) 옮긴다. lane change: 그 구간 동안 최대 옆 속도가 세기 x vlat_max가 되게 옮긴다.
-- 회전 CF: 사람의 속도는 그대로 두고, 그 방향의 회전 차선열(L1 turn_reference) 위에 그린다.
-- 경계에 걸리지 않도록 크기와 시점을 조금씩 바꾼 변형을 만들고, L1이 결정과 맞다고 판정(세기 ±0.1, 이웃
+  결정의 강도에 맞추고(go: 강도 x v_max, stop: 0) 구간 안에서는 등가속으로 잇는다. 사람 경로보다 길어지면
+  마지막 방향으로 곧게 늘인다. 사람이 거의 서 있었으면(4초 동안 2 m 미만) 기준 차로를 따라 그린다.
+- 좌우 CF(keep, offset, lane change): 사람의 속도(점 사이 이동 거리)는 그대로 두고, 이 장면의 기준 차로
+  (L1 lane_reference) 위에 옆 거리 곡선을 새로 그린다. offset: 그 구간 동안 강도 x offset_max만큼 부드럽게
+  (smoothstep) 옮긴다. lane change: 그 구간 동안 최대 옆 속도가 강도 x vlat_max가 되게 옮긴다.
+- 회전 CF: 사람의 속도는 그대로 두고, 그 방향의 회전 chain of 차로(L1 turn_reference) 위에 그린다.
+- 경계에 걸리지 않도록 크기와 시점을 조금씩 바꾼 변형을 만들고, L1이 결정과 맞다고 판정(강도 ±0.1, 이웃
   라벨 허용 없음)한 것 중 사람 경로에 가장 가까운 것을 앞에 둔다. 안전 확인(NAVSIM)은 scripts/l3_synth.py가 한다.
 """
 
@@ -96,7 +96,7 @@ def lateral_curve(d: Decision, scale: float, frac: float, th) -> Optional[np.nda
         if s.lat.startswith("offset"):
             amp = sign * s.lat_strength * th["offset_max"] * scale
         elif s.lat.startswith("lane_change"):
-            # smoothstep의 최대 기울기 = 1.5 x 크기 / 시간 → 최대 옆 속도가 세기 x vlat_max가 되는 크기
+            # smoothstep의 최대 기울기 = 1.5 x 크기 / 시간 → 최대 옆 속도가 강도 x vlat_max가 되는 크기
             amp = sign * s.lat_strength * th["vlat_max"] * (2.0 * frac) / 1.5 * scale
         else:
             amp = 0.0
@@ -121,7 +121,7 @@ def candidates(d: Decision, d0: Decision, human: np.ndarray, v0: float, ego_pose
     lat_changed = any(a.lat != b.lat or abs(a.lat_strength - b.lat_strength) > 1e-6
                       for a, b in zip(d.segments, d0.segments))
     if lon_changed and not lat_changed:
-        # 사람이 거의 서 있었으면(4초 동안 2 m 미만) 경로 모양을 알 수 없으므로 기준 차선을 따라 늘인다
+        # 사람이 거의 서 있었으면(4초 동안 2 m 미만) 경로 모양을 알 수 없으므로 기준 차로를 따라 늘인다
         still = human_step(human).sum() < 2.0
         ref = lane_reference(ego_pose, map_api) if still else None
         for sc in (1.0, 0.95, 1.05, 0.9, 1.1):

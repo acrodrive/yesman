@@ -1,4 +1,4 @@
-"""12단계 (2) 추가: 실제 VLM의 '불가능' 결정을 받았을 때 planner 경로의 결과 안전성 (E1을 실제 VLM 결정에서).
+"""12단계 (2) 추가: 실제 VLM의 '불가능' 결정을 받았을 때 planner 경로의 불가능한 결정의 안전율 (E1을 실제 VLM 결정에서).
 
 D3x_*의 L2 불가능 행(사람과 같음 제외)만 골라, 각 planner의 경로를 행마다 채점한다(scripts/score_rows.py와 같은 채점).
 안전 = NC, DAC, DDC 모두 통과. 불가능 기준(category)별 구성과 기준별 안전도 낸다.
@@ -24,14 +24,14 @@ E = ROOT / "exp/eval"
 RUNS = {"B1": "B1", "B2": "B2", "B-순응": "Bcomply_rt", "B3": "B3_rt", "Ours": "Ours_w025_rt"}
 if "--synth" in sys.argv:  # 12단계 (3): CF⁺ 목표를 합성으로 바꾼 모델
     RUNS = {"B1": "B1", "B2": "B2", "B-순응": "Bcomply_syn", "B3": "B3_syn", "Ours": "Ours_syn"}
-if "--variants" in sys.argv:  # 12단계 A: 넓힌 CF(W), 실제 VLM 결정(V), 둘 다(WV)로 학습한 Ours
+if "--variants" in sys.argv:  # 12단계 A: 확장된 규칙 기반 CF(W), 실제 VLM 결정(V), 둘 다(WV)로 학습한 Ours
     RUNS = {"B-순응": "Bcomply_syn", "Ours": "Ours_syn", "Ours+W": "Ours_W", "Ours+V": "Ours_V", "Ours+WV": "Ours_WV"}
 if "--obj" in sys.argv:  # 12단계 B (진단): 물체 토큰을 더한 Ours (LTF 검출 / 정답 위치 / 정답 위치 + 속도)
     RUNS = {"Ours": "Ours_syn", "Ours+LTF 검출": "Ours_objltf", "Ours+GT 위치": "Ours_objgt", "Ours+GT 위치·속도": "Ours_objgtvel"}
-if "--obj2" in sys.argv:  # 12단계 B 2x2: WV 묶음에서 세기 CF⁻ 무게 올림 x 정답 위치·속도
+if "--obj2" in sys.argv:  # 12단계 B 2x2: WV 묶음에서 강도 CF⁻ 무게 올림 x 정답 위치·속도
     RUNS = {"Ours+WV": "Ours_WV", "Ours+WV 세기 무게": "Ours_WVbal", "Ours+WV GT 위치·속도": "Ours_WVgtvel",
             "Ours+WV 세기 무게 GT 위치·속도": "Ours_WVbalgtvel"}
-if "--plaus" in sys.argv:  # 12단계 C: 그럴싸한 CF⁻를 CF⁻ 무게의 85%로 넣은 Ours (아키텍처와 나머지 설정은 그대로)
+if "--plaus" in sys.argv:  # 12단계 C: plausible CF⁻를 CF⁻ 무게의 85%로 넣은 Ours (아키텍처와 나머지 설정은 그대로)
     RUNS = {"Ours": "Ours_syn", "Ours+그럴싸한 CF⁻": "Ours_plaus"}
 VLMS = {"Gemma 4 12B": "gemma12b", "Gemma 4 31B": "gemma31b", "Qwen3-VL 8B": "qwen8b"}
 SAFE = ["no_at_fault_collisions", "drivable_area_compliance", "driving_direction_compliance"]

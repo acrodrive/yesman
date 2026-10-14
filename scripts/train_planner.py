@@ -52,7 +52,7 @@ def batch_inputs(feats, s, idx):
 
 @torch.no_grad()
 def evaluate(model, feats, s, seeds=(0, 1, 2), n_steps=10, bs=1024):
-    """DDIM으로 샘플링한 경로와 목표 경로의 오차 (샘플 종류별). seed마다 시작 노이즈를 바꾼다."""
+    """DDIM으로 샘플링한 경로와 target 경로의 오차 (샘플 종류별). seed마다 시작 노이즈를 바꾼다."""
     model.eval()
     preds, flags = [], []
     for seed in seeds:
@@ -128,9 +128,9 @@ def main():
     ap.add_argument("--pred", choices=["x0", "v"], default="x0")
     ap.add_argument("--loss", choices=["l1", "mse"], default="l1")
     ap.add_argument("--balance_strength", action="store_true",
-                    help="CF⁻ 안에서 세기 기준 CF⁻의 전체 무게를 도로 기준과 같게 한다 (CF⁻ 전체 무게는 그대로, 12단계 B)")
+                    help="CF⁻ 안에서 강도 기준 CF⁻의 전체 무게를 도로 기준과 같게 한다 (CF⁻ 전체 무게는 그대로, 12단계 B)")
     ap.add_argument("--plausible_share", type=float, default=0.0,
-                    help="CF⁻ 안에서 그럴싸한 CF⁻(source = plausible)의 무게 비중 (CF⁻ 전체 무게는 그대로, 12단계 C)")
+                    help="CF⁻ 안에서 plausible CF⁻(source = plausible)의 무게 비중 (CF⁻ 전체 무게는 그대로, 12단계 C)")
     ap.add_argument("--keep_unseen", action="store_true", help="보이지 않는 원인 CF⁻도 학습에 쓴다 (기본: 뺀다, 10단계 결정)")
     ap.add_argument("--balance_by_type", action="store_true",
                     help="결정 종류(구간별 앞뒤·좌우 행동, 강도 무시)마다 CF⁻ 무게 / CF⁺ 무게를 전체 비율과 같게 한다. 결정 종류만 "

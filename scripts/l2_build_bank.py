@@ -2,7 +2,7 @@
 
 입력: exp/l1/navtrain_features.parquet (4단계 l1_extract.py), exp/l1/navtrain_labels.parquet (l1_label.py)
 출력: exp/l2/path_bank.parquet (valid 장면만. 열: token, log_name, map_name, v0, poses, seg*_ 라벨,
-      pt_s / pt_d / pt_hrel = 원래 차선 기준의 진행 거리, 옆 거리, 차선 대비 방향 (점 9개, 차선 기준으로 옮길 때 씀))
+      pt_s / pt_d / pt_hrel = 원래 차로 기준의 진행 거리, 옆 거리, 차로 대비 방향 (점 9개, 차로 기준으로 옮길 때 씀))
 
 사용법: python scripts/l2_build_bank.py
 """

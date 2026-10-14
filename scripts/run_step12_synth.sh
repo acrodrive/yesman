@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 12단계 (3) CF⁺ 목표 합성: 학습 묶음 합성 → (31B가 GPU를 비우면) B-순응, B3, Ours 시드 0, 1 다시 학습 → 평가.
-# 설정은 10단계 최종과 같다(2만 step, CF⁻ 무게 0.25, 보이지 않는 원인 제외). 바뀌는 것은 CF⁺ 목표 경로뿐이다.
+# 설정은 10단계 최종과 같다(2만 step, CF⁻ 무게 0.25, 보이지 않는 원인 제외). 바뀌는 것은 CF⁺ target 경로뿐이다.
 set -uo pipefail
 source /workspace/yesman/scripts/setup/env.sh
 cd /workspace/yesman

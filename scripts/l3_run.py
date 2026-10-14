@@ -4,7 +4,7 @@
 출력: exp/l3/<name>.parquet — 장면 x 결정(원래 + CF)마다 한 줄
   열: token, log_name, cf_name(original / keep / lc_L ...), change_type, d_seg*_ (결정), status, reason,
       fail_*, category(strength/agent/road, CF⁻만), visibility(visible/unseen/unknown, agent 기준만),
-      weaker_status, best_poses(가능: 목표 경로, 불가능: 떨어진 후보 중 최고), n_* 후보 수 등,
+      weaker_status, best_poses(가능: target 경로, 불가능: 떨어진 후보 중 최고), n_* 후보 수 등,
       closest_poses(14단계: 가능일 때 통과한 후보 중 사람 경로에 가장 가까운 것, yesman/l3.py closest_target)
 
 사용법:
@@ -37,7 +37,7 @@ _L2 = None
 
 
 def judge(ctx, d, seed, is_cf: bool):
-    """L2 판정 + 6단계 규칙: 교차로 회전 차선열 없이(ego 좌표로 옮겨) 판정한 turn CF가 "가능"이면 판정 불가로 바꾼다.
+    """L2 판정 + 6단계 규칙: 교차로 회전 chain of 차로 없이(ego 좌표로 옮겨) 판정한 turn CF가 "가능"이면 판정 불가로 바꾼다.
     4초 안에 길을 벗어나지 않았을 뿐, 그 뒤에 실행할 수 있는지는 확인할 수 없기 때문이다(계획서 13.4의 4초 한계)."""
     res = _L2.judge(ctx, d, np.random.default_rng(seed))
     has_turn = any(s.lat.startswith("turn") for s in d.segments)
@@ -124,7 +124,7 @@ def main():
     ap.add_argument("--n_cf", type=int, default=0, help="장면마다 CF를 이만큼 무작위로 고른다 (0: 메뉴 전부)")
     ap.add_argument("--skip_original", action="store_true", help="원래 결정은 L2로 판정하지 않는다 (학습 장면)")
     ap.add_argument("--only_turn", action="store_true", help="회전 CF와 회전이 있는 원래 결정만 다시 판정한다")
-    ap.add_argument("--wide", action="store_true", help="12단계 A: 넓힌 CF 메뉴(yesman/l3.py cf_menu_wide)")
+    ap.add_argument("--wide", action="store_true", help="12단계 A: 확장된 규칙 기반 CF 메뉴(yesman/l3.py cf_menu_wide)")
     ap.add_argument("--merge_into", type=Path, default=None, help="이 표의 같은 (token, cf_name) 행을 새 결과로 바꿔 저장한다")
     ap.add_argument("--max_scenes", type=int, default=None)
     ap.add_argument("--workers", type=int, default=16)

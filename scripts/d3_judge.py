@@ -2,7 +2,7 @@
 
 판정은 6단계 CF와 같은 함수(scripts/l3_run.py의 judge)를 쓴다. VLM 결정은 사람이 실제로 한 결정이 아니므로
 CF와 같이 "교차로 밖 turn의 가능 → 판정 불가" 규칙을 적용한다. 불가능이면 CF⁻와 같은 방법으로 불가능 기준
-(strength / agent / road)과 보이지 않는 원인을 붙인다(세기를 낮추는 기준은 사람의 원래 결정 d0이다).
+(strength / agent / road)과 보이지 않는 원인을 붙인다(강도를 낮추는 기준은 사람의 원래 결정 d0이다).
 
 사용법: python scripts/d3_judge.py --name d3 [--out data_lists/eval/D3.parquet]
 출력 열: token, log_name, scene_description, key_issue, raw_output, parse_status(ok / json_error / truncated / ...),

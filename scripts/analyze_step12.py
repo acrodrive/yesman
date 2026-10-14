@@ -1,7 +1,7 @@
 """12단계 분석: (1) B3 (Ours에서 판단 head만 뺀 것), (2) D3 확장 (VLM 3개 x 3,000장면).
 
 정의는 11단계와 같다(scripts/analyze_step11.py, docs/step11_eval.md). 결과를 보기 전에 정함.
-(1) B3는 항상 ACCEPT. E1 결과 안전성 = D2 주 결과에서 그린 경로가 NC·DAC·DDC를 모두 통과한 비율.
+(1) B3는 항상 ACCEPT. E1 불가능한 결정의 안전율 = D2 주 결과에서 그린 경로가 NC·DAC·DDC를 모두 통과한 비율.
 (2) VLM 결정 유형: 사람과 같음 → 다르지만 안전 → 가능하지만 위험(L2 최고 경로가 TLC 또는 TTC를 어김) → 불가능.
     판정 불가와 파싱 실패는 빼고 비율을 낸다. 비율과 실행 비율에 Wilson 95% CI를 붙인다.
     planner의 "실행" = ACCEPT이고 d̂ ≈ d (Ours는 p >= τ).

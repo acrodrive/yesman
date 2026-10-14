@@ -1,6 +1,6 @@
 """결정 d의 형식 (yesman.md 6.1).
 
-4초 경로를 구간(기본 2개: 0~2초, 2~4초)으로 나누고, 구간마다 앞뒤 행동, 좌우 행동, 각각의 세기(0~1)를 정한다.
+4초 경로를 구간(기본 2개: 0~2초, 2~4초)으로 나누고, 구간마다 앞뒤 행동, 좌우 행동, 각각의 강도(0~1)를 정한다.
 L1(경로 → 결정), L3(counterfactual decision), M2(결정 인코더), VLM 출력 파싱이 모두 이 형식을 쓴다.
 """
 
@@ -22,7 +22,7 @@ class Segment:
     ambiguous_lat: bool = False
     alt_lon: str = ""  # 앞뒤 행동 값이 기준값 근처이면, 기준선 너머의 이웃 라벨 (d̂ ≈ d 판정 때 허용)
     alt_lat: str = ""  # 좌우 행동 값이 기준값(turn, offset) 근처이면, 기준선 너머의 이웃 라벨
-    structural: bool = False  # 구조적 애매함 (차선 경계 근처, 차선 밖 방향 등). 학습과 평가에서 뺀다
+    structural: bool = False  # 구조적 애매함 (차로 경계 근처, 차로 밖 방향 등). 학습과 평가에서 뺀다
 
     def __post_init__(self):
         assert self.lon in LON_ACTIONS, self.lon
@@ -32,7 +32,7 @@ class Segment:
 @dataclass
 class Decision:
     segments: List[Segment]
-    valid: bool = True  # False: 출발 차선을 찾지 못하는 등 결정을 정할 수 없음 (학습과 평가에서 뺀다)
+    valid: bool = True  # False: 출발 차로를 찾지 못하는 등 결정을 정할 수 없음 (학습과 평가에서 뺀다)
     reason: str = ""  # valid=False 또는 애매한 이유
     extra: Dict[str, float] = field(default_factory=dict)  # 디버그용 값
 
@@ -114,9 +114,9 @@ def same_decision(d: Decision, d_hat: Decision, strength_tol: float = 0.2,
                   allow_neighbor: bool = True) -> Optional[bool]:
     """d̂ ≈ d 판정 (yesman.md 6.2, 14절, 4단계 결정).
 
-    구간마다 행동 종류가 같고 세기 차이가 strength_tol 이내이면 같다고 본다. keep_lane의 세기는 비교하지 않는다.
+    구간마다 행동 종류가 같고 강도 차이가 strength_tol 이내이면 같다고 본다. keep_lane의 강도는 비교하지 않는다.
     allow_neighbor이면, 한쪽 라벨의 값이 기준값 근처여서 기준선 너머의 이웃 라벨(alt_lon, alt_lat)이 다른 쪽 라벨과
-    같을 때에도 그 행동은 일치로 본다. 이때 세기는 비교하지 않는다 (기준선 근처라 세기도 경계값이다).
+    같을 때에도 그 행동은 일치로 본다. 이때 강도는 비교하지 않는다 (기준선 근처라 강도도 경계값이다).
     둘 중 하나가 invalid이면 None을 낸다.
     """
     if not (d.valid and d_hat.valid) or len(d.segments) != len(d_hat.segments):

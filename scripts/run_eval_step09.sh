@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 9단계: 학습한 비교 모델의 평가 (예측 → L1 따르기 판정 → 공식 D0 채점). 시드 0 먼저.
+# 9단계: 학습한 비교 모델의 평가 (예측 → L1 결정–경로 일치 판정 → 공식 D0 채점). 시드 0 먼저.
 # 사용법: nohup setsid scripts/run_eval_step09.sh > logs/step09/eval_all.log 2>&1 &
 set -uo pipefail
 source /workspace/yesman/scripts/setup/env.sh

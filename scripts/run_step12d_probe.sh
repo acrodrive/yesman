@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 12단계 D: 12단계 C(그럴싸한 CF⁻) 평가가 끝나면 probe 시험을 돌린다 (GPU, 모델 하나에 약 3분).
+# 12단계 D: 12단계 C(plausible CF⁻) 평가가 끝나면 probe 시험을 돌린다 (GPU, 모델 하나에 약 3분).
 set -uo pipefail
 source /workspace/yesman/scripts/setup/env.sh
 cd /workspace/yesman

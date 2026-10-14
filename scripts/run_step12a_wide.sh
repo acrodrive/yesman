@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 12단계 A: 넓힌 CF 메뉴로 학습 장면 판정 (CPU). 6단계 학습용 판정과 같은 설정에 --wide만 더한다.
+# 12단계 A: 확장된 규칙 기반 CF 메뉴로 학습 장면 판정 (CPU). 6단계 학습용 판정과 같은 설정에 --wide만 더한다.
 set -uo pipefail
 source /workspace/yesman/scripts/setup/env.sh
 cd /workspace/yesman

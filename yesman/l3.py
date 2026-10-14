@@ -1,22 +1,22 @@
 """L3 counterfactual decision 생성과 불가능 기준 분류 (yesman.md 7.3, 6단계).
 
 CF 메뉴 (장면마다, 원래 결정 d0에서 만든다): 5단계의 교훈대로 결정의 모양은 사람 경로를 L1이 실제로 읽는 모양을 따른다.
-차선 중앙에서 출발한 navtrain 사람 경로에서 가장 흔한 (구간 1, 구간 2) 조합과 세기 중앙값이다 (docs/step06_cf.md).
+차로 중앙에서 출발한 navtrain 사람 경로에서 가장 흔한 (구간 1, 구간 2) 조합과 강도 중앙값이다 (docs/step06_cf.md).
 - 좌우 바꾸기 (앞뒤는 원래대로)
     keep:          [keep, keep]
     offset_L/R:    [offset 0.4, keep]
     lc_L/R:        [offset 0.6, lane change 0.5]
     turn_L/R:      [turn 0.6, turn 0.6]      (교차로에서 가장 흔한 회전)
     turn_late_L/R: [keep, turn 0.6]          (조금 가다가 회전. 교차로 밖 좌회전에서도 가장 흔하다)
-- 세기 바꾸기 (좌우는 원래대로)
-    faster: 구간마다 go 세기 +0.3 (stop이면 go 0.3)
-    slower: 구간마다 go 세기 -0.3 (원래 세기가 0.15 미만이거나 stop인 구간은 그대로. 바뀌는 구간이 없으면 만들지 않는다)
+- 강도 바꾸기 (좌우는 원래대로)
+    faster: 구간마다 go 강도 +0.3 (stop이면 go 0.3)
+    slower: 구간마다 go 강도 -0.3 (원래 강도가 0.15 미만이거나 stop인 구간은 그대로. 바뀌는 구간이 없으면 만들지 않는다)
 - 앞뒤 바꾸기 (좌우는 원래대로)
     stop: [stop s, stop 0] — s = 지금 속도에서 2초 안에 멈추는 평균 감속도 / a_max (최대 1)
 원래 결정과 같은 CF(d̂ ≈ d)는 만들지 않는다.
 
 불가능 기준 분류 (CF⁻, 계획서 7.3의 순서):
-1. 세기 기준: CF에서 바뀐 세기를 0.3 낮춘 결정이 "가능"이면 (그 행동 자체는 할 수 있지만 그 세기로는 못 한다)
+1. 강도 기준: CF에서 바뀐 강도를 0.3 낮춘 결정이 "가능"이면 (그 행동 자체는 할 수 있지만 그 강도로는 못 한다)
 2. 다른 차·보행자 기준: 아니면, 채점한 후보 중 충돌로 떨어진 비율이 절반 이상이고 도로 이탈, 역주행 비율보다 크면
 3. 도로 모양 기준: 그 외 (주로 도로 이탈, 역주행)
 보이지 않는 원인: 다른 차·보행자 기준에서, 대표 후보가 처음 부딪히는 물체가 현재 시점에 전방 3캠 시야(카메라 기준 방위각
@@ -34,7 +34,7 @@ from shapely.geometry import Polygon
 from yesman.decision import Decision, Segment, same_decision
 from yesman.l1 import SEG_DURATION, load_thresholds
 
-STRENGTH_DROP = 0.3  # 세기 기준 확인: 바뀐 세기를 이만큼 낮춘다
+STRENGTH_DROP = 0.3  # 강도 기준 확인: 바뀐 강도를 이만큼 낮춘다
 CAM_X = 1.65  # 전방 카메라 위치 (뒤차축 앞) [m]
 CAM_HALF_FOV = np.deg2rad(87.0)  # L0, F0, R0가 함께 덮는 방위각 (카메라 기준 ±87도)
 
@@ -70,11 +70,11 @@ def cf_menu(d0: Decision, v0: float) -> Dict[str, Decision]:
 
 
 def cf_menu_wide(d0: Decision, v0: float, rng: np.random.Generator) -> Dict[str, Decision]:
-    """12단계 A: 넓힌 CF 메뉴 (결과를 보기 전에 정함). 실제 VLM의 틀린 결정은 앞뒤와 좌우를 동시에 바꾸거나 메뉴에 없는
-    세기를 쓴다(12단계 분석). 장면마다 4개: 동시 변경 2개, 좌우 세기 무작위 1개, 속도 무작위 1개.
+    """12단계 A: 확장된 규칙 기반 CF 메뉴 (결과를 보기 전에 정함). 실제 VLM의 틀린 결정은 앞뒤와 좌우를 동시에 바꾸거나 메뉴에 없는
+    강도를 쓴다(12단계 분석). 장면마다 4개: 동시 변경 2개, 좌우 강도 무작위 1개, 속도 무작위 1개.
     - 동시 변경: cf_menu의 좌우 CF 하나 + 앞뒤 CF(faster / slower / stop) 하나를 함께 적용한다.
-    - 좌우 세기 무작위: cf_menu의 좌우 CF 하나의 좌우 세기를 U(0.2, 1.0)으로 바꾼다.
-    - 속도 무작위: 구간마다 go 세기를 U(0.05, 1.0)으로 바꾼다(좌우는 원래대로).
+    - 좌우 강도 무작위: cf_menu의 좌우 CF 하나의 좌우 강도를 U(0.2, 1.0)으로 바꾼다.
+    - 속도 무작위: 구간마다 go 강도를 U(0.05, 1.0)으로 바꾼다(좌우는 원래대로).
     원래 결정과 같은 것(이웃 라벨 허용 없이)은 뺀다."""
     base = cf_menu(d0, v0)
     lat_names = [k for k in base if k in ("keep", "offset_L", "offset_R", "lc_L", "lc_R", "turn_L", "turn_R",
@@ -116,7 +116,7 @@ def change_type(d0: Decision, d: Decision) -> str:
 
 
 def weaker(d0: Decision, d: Decision) -> Optional[Decision]:
-    """세기 기준 확인용: CF에서 원래 결정과 다른 행동의 세기를 STRENGTH_DROP만큼 낮춘 결정. 낮출 것이 없으면 None."""
+    """강도 기준 확인용: CF에서 원래 결정과 다른 행동의 강도를 STRENGTH_DROP만큼 낮춘 결정. 낮출 것이 없으면 None."""
     segs, changed = [], False
     for a, b in zip(d0.segments, d.segments):
         kw = {}
@@ -124,7 +124,7 @@ def weaker(d0: Decision, d: Decision) -> Optional[Decision]:
             kw["lat_strength"] = max(0.05, b.lat_strength - STRENGTH_DROP)
         if b.lon != a.lon or abs(b.lon_strength - a.lon_strength) > 1e-6:
             if b.lon == "go" and a.lon == "go":
-                # 빠르게/느리게: 원래 세기 쪽으로 STRENGTH_DROP만큼 되돌린다
+                # 빠르게/느리게: 원래 강도 쪽으로 STRENGTH_DROP만큼 되돌린다
                 step = np.sign(b.lon_strength - a.lon_strength) * STRENGTH_DROP
                 kw["lon_strength"] = float(np.clip(b.lon_strength - step, 0.0, 1.0))
             elif b.lon_strength > 0:

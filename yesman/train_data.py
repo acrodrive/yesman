@@ -1,7 +1,7 @@
 """학습 데이터: 학습 묶음(exp/l3/train_bundle_*.parquet) + LTF 특징(exp/features/ltf/) → GPU 텐서.
 
 특징은 작으므로(navtrain 1.15 GB, fp16) GPU에 통째로 올리고, batch는 GPU에서 행 번호로 꺼낸다.
-샘플 한 줄 = (장면 특징 행 번호, 결정, 목표 경로, flag, 판단 근거, 샘플 종류).
+샘플 한 줄 = (장면 특징 행 번호, 결정, target 경로, flag, 판단 근거, 샘플 종류).
 """
 
 import os
@@ -36,7 +36,7 @@ def load_features(split: str, device="cuda", bev_sem: bool = False, obj: str = "
 
 
 def decision_arrays(df: pd.DataFrame, prefix: str = "d_") -> Dict[str, np.ndarray]:
-    """결정 열(d_seg{k}_lon ...) → 행동 번호와 세기 배열 (N, N_SEG)."""
+    """결정 열(d_seg{k}_lon ...) → 행동 번호와 강도 배열 (N, N_SEG)."""
     lon_id, lat_id = {a: i for i, a in enumerate(LON_ACTIONS)}, {a: i for i, a in enumerate(LAT_ACTIONS)}
     k = range(1, N_SEG + 1)
     return {
@@ -91,5 +91,5 @@ def load_bundle(name: str, feats: Dict, sample_types: Iterable[str] = SAMPLE_TYP
 
 
 def pose_stats(s: Samples):
-    """목표 경로의 (시점, 축)별 평균과 표준편차 (정규화용, 학습 세트에서만 계산한다)."""
+    """target 경로의 (시점, 축)별 평균과 표준편차 (정규화용, 학습 세트에서만 계산한다)."""
     return s.target.mean(0), s.target.std(0).clamp(min=1e-3)

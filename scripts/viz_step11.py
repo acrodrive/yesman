@@ -1,9 +1,9 @@
 """11단계 Figure 3(BEV 시각화)과 실패 사례 그림. 장면은 아래 조건에 맞는 행에서 무작위(시드 0)로 고른다 (결과를 보기 전에 정함).
 
-Figure 3: (가) D1의 offset·차선 변경 결정 중 Ours가 ACCEPT하고 결정대로 그린 장면 2개,
+Figure 3: (가) D1의 offset·차로 변경 결정 중 Ours가 ACCEPT하고 결정대로 그린 장면 2개,
           (나) D2 다른 차·보행자 기준(주 결과) 중 B-순응은 결정대로 실행하고 Ours는 REJECT한 장면 2개.
-실패 사례 (Ours 시드 0): 청개구리(D1 REJECT) 2, 맹목적 추종(D2 주 결과 ACCEPT이고 결정대로) 2,
-          대체 경로 실패(D2 REJECT인데 Ours 경로가 NC·DAC·DDC 중 하나라도 실패) 2, 언행 불일치(D1 ACCEPT인데 결정과 다름) 2.
+실패 사례 (Ours 시드 0): 과잉 거부(D1 REJECT) 2, 맹목적 추종(D2 주 결과 ACCEPT이고 결정대로) 2,
+          대체 경로 실패(D2 REJECT인데 Ours 경로가 NC·DAC·DDC 중 하나라도 실패) 2, flag–경로 불일치(D1 ACCEPT인데 결정과 다름) 2.
 
 그림: 왼쪽 CAM_F0에 경로 투영, 오른쪽 BEV(지도, 물체, 다른 물체의 4초 움직임 점선).
   검은 점선 = 사람, 청록 = B2, 주황 = B-순응, 파랑(굵게) = Ours. 제목: 결정, Ours의 flag, 판정.

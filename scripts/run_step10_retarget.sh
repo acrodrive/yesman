@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 10단계 시험 (가): CF⁺ 학습 목표 일관화 → B-순응 시드 0 검증 시험 → (통과하면) B-순응, Ours 시드 2개 다시 학습 + 전체 평가.
-# 고르는 규칙 (결과를 보기 전에 정함): 검증 CF⁺ 따르기 >= 0.620 + 0.03, 원래 결정 따르기 >= 0.955 - 0.01.
+# 고르는 규칙 (결과를 보기 전에 정함): 검증 CF⁺ 결정–경로 일치율 >= 0.620 + 0.03, 원래 결정의 결정–경로 일치율 >= 0.955 - 0.01.
 set -uo pipefail
 source /workspace/yesman/scripts/setup/env.sh
 cd /workspace/yesman

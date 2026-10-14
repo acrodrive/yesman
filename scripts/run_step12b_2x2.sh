@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 12단계 B 2x2: WV 묶음(세기 CF⁻ 2,198개)에서 세기 CF⁻ 무게 올림(--balance_strength) x 정답 위치·속도(--obj gtvel).
+# 12단계 B 2x2: WV 묶음(강도 CF⁻ 2,198개)에서 강도 CF⁻ 무게 올림(--balance_strength) x 정답 위치·속도(--obj gtvel).
 # 기준 칸(무게 그대로, 속도 없음)은 12단계 A의 Ours_WV. GPU 학습은 바로, CPU 평가는 앞 사다리 평가가 끝난 뒤.
 set -uo pipefail
 source /workspace/yesman/scripts/setup/env.sh

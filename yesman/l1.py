@@ -1,45 +1,45 @@
-"""L1 결정 라벨러 (yesman.md 6.1, 7.1): 경로 하나와 지도의 차선 정보로 결정 d를 계산한다.
+"""L1 결정 라벨러 (yesman.md 6.1, 7.1): 경로 하나와 지도의 차로 정보로 결정 d를 계산한다.
 
 라벨을 만들 때(사람 경로)와 평가할 때(모델 경로) 모두 이 함수 하나를 쓴다.
 
 두 단계로 나뉜다.
-1. extract_features(): 지도를 써서 경로를 차선 중심선 좌표계로 바꾸고, 구간마다 필요한 값을 계산한다 (느림).
-2. classify(): 기준값(thresholds)으로 행동과 세기를 정한다 (빠름). 기준값은 navtrain 분포로 정한다(l1_thresholds.yaml).
+1. extract_features(): 지도를 써서 경로를 차로 중심선 좌표계로 바꾸고, 구간마다 필요한 값을 계산한다 (느림).
+2. classify(): 기준값(thresholds)으로 행동과 강도를 정한다 (빠름). 기준값은 navtrain 분포로 정한다(l1_thresholds.yaml).
 
 좌표와 시간
 - 경로는 NAVSIM 형식이다. ego 좌표계(현재 뒤차축 원점, x 앞, y 왼쪽, heading 반시계 +)에서 0.5초 간격 8점(4초)이다.
 - 현재 위치 (0, 0, 0)을 앞에 붙여 9점(t = 0, 0.5, ..., 4.0초)으로 쓴다. 구간 k는 점 SEGMENTS[k][0] ~ SEGMENTS[k][1]이다.
 
-기준 차선열 (reference chain)
-- 출발점을 포함하고 방향이 ego와 맞는 차선(또는 교차로 연결 차선)에서 시작하여, 이어지는 차선(outgoing edges)을
-  경로가 지나간 거리만큼 따라간 차선열들을 만든다. 그중 경로와의 옆 거리 평균이 가장 작은 차선열을 기준으로 쓴다.
-  따라서 교차로에서 좌회전한 경로는 좌회전 연결 차선을 따라가는 차선열이 기준이 된다.
-  고를 때의 비용 = 옆 거리 평균 + CHAIN_HEADING_COST x 방향 차이 평균 + 차선열 끝을 넘은 점의 벌점.
-- 경로의 각 점을 기준 중심선에 투영하여 진행 거리 s와 옆 거리 d(왼쪽 +)를 구한다. 그 점에서의 차선 반폭(왼쪽, 오른쪽)은
-  차선 경계선까지의 거리로 구한다.
+기준 chain of 차로 (reference chain)
+- 출발점을 포함하고 방향이 ego와 맞는 차로(또는 교차로 연결 차로)에서 시작하여, 이어지는 차로(outgoing edges)를
+  경로가 지나간 거리만큼 따라간 chain of 차로들을 만든다. 그중 경로와의 옆 거리 평균이 가장 작은 chain of 차로를 기준으로 쓴다.
+  따라서 교차로에서 좌회전한 경로는 좌회전 연결 차로를 따라가는 chain of 차로가 기준이 된다.
+  고를 때의 비용 = 옆 거리 평균 + CHAIN_HEADING_COST x 방향 차이 평균 + chain of 차로 끝을 넘은 점의 벌점.
+- 경로의 각 점을 기준 중심선에 투영하여 진행 거리 s와 옆 거리 d(왼쪽 +)를 구한다. 그 점에서의 차로 반폭(왼쪽, 오른쪽)은
+  차로 경계선까지의 거리로 구한다.
 
 좌우 행동 판정 (구간마다, 위에서부터 먼저 해당하는 것)
-1. turn: (a) 구간이 교차로 연결 차선(lane connector)을 지나고, 경로 방향이 turn_min_deg 이상 바뀌었다.
-   세기 = |방향 변화| / turn_max_deg. 또는 (b) 구간 끝에서 경로 방향이 기준 차선 방향과 turn_offlane_deg 이상
-   틀어졌다(교차로 밖, 즉 연결 차선을 지나지 않는 구간에서 차선을 벗어나 꺾음. 5단계에서 추가).
-   세기 = |차선 대비 방향| / turn_max_deg. 교차로 안에서는 기준 차선열 선택이 흔들려 (b)를 쓰지 않는다.
-   굽은 길을 따라가면 차선도 같이 굽으므로 (b)에 해당하지 않는다.
-2. lane change: 구간 시작과 끝의 차선 번호가 다르다. 차선 번호는 기준 차선을 0으로, 왼쪽으로 한 차선 폭마다 +1이다.
-   옆 차선이 실제로 있는지는 보지 않는다(기하만으로 판정). 그래야 도로가 없는 쪽으로 차선 변경을 따라간 경로도 lane change로 잡힌다.
-   세기 = 구간 안에서 0.5초마다 잰 옆 이동 속도의 최대값 / vlat_max.
-3. offset: 같은 차선 안에서 옆 거리가 offset_min 이상 바뀌었다. 세기 = |옆 거리 변화| / offset_max.
-   차선 중심선의 방향이 구간 동안 curve_deg 이상 바뀌면(굽은 도로) 기준을 offset_min_curve로 키운다.
-   사람은 굽은 길에서 코너 안쪽으로 가로질러 달리므로, 그만큼의 옆 거리 변화는 차선을 따라간 것으로 본다.
-4. 나머지는 keep lane (세기 0). 굽은 도로에서 차선을 따라 달린 경로는 d가 거의 변하지 않으므로 keep lane이 된다.
+1. turn: (a) 구간이 교차로 연결 차로(lane connector)를 지나고, 경로 방향이 turn_min_deg 이상 바뀌었다.
+   강도 = |방향 변화| / turn_max_deg. 또는 (b) 구간 끝에서 경로 방향이 기준 차로 방향과 turn_offlane_deg 이상
+   틀어졌다(교차로 밖, 즉 연결 차로를 지나지 않는 구간에서 차로를 벗어나 꺾음. 5단계에서 추가).
+   강도 = |차로 대비 방향| / turn_max_deg. 교차로 안에서는 기준 chain of 차로 선택이 흔들려 (b)를 쓰지 않는다.
+   굽은 길을 따라가면 차로도 같이 굽으므로 (b)에 해당하지 않는다.
+2. lane change: 구간 시작과 끝의 차로 번호가 다르다. 차로 번호는 기준 차로를 0으로, 왼쪽으로 한 차로 폭마다 +1이다.
+   옆 차로가 실제로 있는지는 보지 않는다(기하만으로 판정). 그래야 도로가 없는 쪽으로 차로 변경을 따라간 경로도 lane change로 잡힌다.
+   강도 = 구간 안에서 0.5초마다 잰 옆 이동 속도의 최대값 / vlat_max.
+3. offset: 같은 차로 안에서 옆 거리가 offset_min 이상 바뀌었다. 강도 = |옆 거리 변화| / offset_max.
+   차로 중심선의 방향이 구간 동안 curve_deg 이상 바뀌면(굽은 도로) 기준을 offset_min_curve로 키운다.
+   사람은 굽은 길에서 코너 안쪽으로 가로질러 달리므로, 그만큼의 옆 거리 변화는 차로를 따라간 것으로 본다.
+4. 나머지는 keep lane (강도 0). 굽은 도로에서 차로를 따라 달린 경로는 d가 거의 변하지 않으므로 keep lane이 된다.
 
 앞뒤 행동 판정 (구간마다)
 - 구간 끝 속도가 v_stop 미만이면 stop, 아니면 go이다. 구간 끝 속도는 마지막 두 0.5초 평균 속도에서 선형 외삽한 값이다.
-- go 세기 = 구간 끝 속도 / v_max. stop 세기 = 구간 평균 감속도 (구간 시작 속도 - 끝 속도) / 2초 / a_max.
+- go 강도 = 구간 끝 속도 / v_max. stop 강도 = 구간 평균 감속도 (구간 시작 속도 - 끝 속도) / 2초 / a_max.
   구간 1의 시작 속도는 현재 차량 속도(ego status)이고, 구간 2의 시작 속도는 구간 1의 끝 속도이다.
 
-애매함 (ambiguous): 값이 기준값 경계의 margin 안에 있으면 그 구간의 라벨을 애매함으로 표시한다. 출발 차선을 찾지 못하면
-결정 전체가 invalid이다(주차장 등). 경로가 기준 차선열 밖으로 크게 벗어나면(차선 방향과 heading_rel_max_deg 이상 어긋남,
-차선열 끝을 넘어감) 좌우 행동을 애매함으로 표시한다.
+애매함 (ambiguous): 값이 기준값 경계의 margin 안에 있으면 그 구간의 라벨을 애매함으로 표시한다. 출발 차로를 찾지 못하면
+결정 전체가 invalid이다(주차장 등). 경로가 기준 chain of 차로 밖으로 크게 벗어나면(차로 방향과 heading_rel_max_deg 이상 어긋남,
+chain of 차로 끝을 넘어감) 좌우 행동을 애매함으로 표시한다.
 """
 
 from dataclasses import dataclass
@@ -62,13 +62,13 @@ SEG_DURATION = 2.0  # [s]
 THRESHOLDS_PATH = Path(__file__).with_name("l1_thresholds.yaml")
 
 # 지도 탐색 설정 (기준값이 아니라 탐색 범위이다)
-START_SEARCH_RADIUS = 3.0  # 출발 차선 후보를 찾는 반경 [m]
-START_MAX_DIST = 1.0  # 출발점이 차선 다각형 밖이어도 이 거리 안이면 후보로 본다 [m]
-START_HEADING_TOL = np.deg2rad(60)  # 출발 차선 방향과 ego 방향의 최대 차이
-CHAIN_EXTRA = 15.0  # 경로가 지나간 거리보다 이만큼 더 길게 차선열을 만든다 [m]
+START_SEARCH_RADIUS = 3.0  # 출발 차로 후보를 찾는 반경 [m]
+START_MAX_DIST = 1.0  # 출발점이 polygon 밖이어도 이 거리 안이면 후보로 본다 [m]
+START_HEADING_TOL = np.deg2rad(60)  # 출발 차로 방향과 ego 방향의 최대 차이
+CHAIN_EXTRA = 15.0  # 경로가 지나간 거리보다 이만큼 더 길게 chain of 차로를 만든다 [m]
 MAX_CHAINS = 64
-CHAIN_BEYOND_PENALTY = 2.0  # 차선열을 고를 때, 차선열 끝을 넘은 경로 점 하나마다 더하는 벌점 [m]
-CHAIN_HEADING_COST = 0.05  # 차선열을 고를 때, 경로와 중심선의 방향 차이 1도마다 더하는 비용 [m/deg] (20도 = 옆 거리 1 m)
+CHAIN_BEYOND_PENALTY = 2.0  # chain of 차로를 고를 때, chain of 차로 끝을 넘은 경로 점 하나마다 더하는 벌점 [m]
+CHAIN_HEADING_COST = 0.05  # chain of 차로를 고를 때, 경로와 중심선의 방향 차이 1도마다 더하는 비용 [m/deg] (20도 = 옆 거리 1 m)
 
 
 @lru_cache(maxsize=1)
@@ -78,7 +78,7 @@ def load_thresholds(path: Optional[str] = None) -> Dict[str, float]:
 
 
 # ----------------------------------------------------------------------------------------------------------------
-# 지도: 차선 하나의 중심선과 경계선 (프로세스 안에서 캐시)
+# 지도: 차로 하나의 중심선과 경계선 (프로세스 안에서 캐시)
 # ----------------------------------------------------------------------------------------------------------------
 
 @dataclass
@@ -111,7 +111,7 @@ def _edge(map_api: AbstractMap, obj: LaneGraphEdgeMapObject) -> _Edge:
 
 
 def _chains(map_api: AbstractMap, start: _Edge, need: float) -> List[List[_Edge]]:
-    """start에서 이어지는 차선을 따라 길이 need 이상이 되는 차선열을 모두 만든다 (갈래마다 하나)."""
+    """start에서 이어지는 차로를 따라 길이 need 이상이 되는 chain of 차로를 모두 만든다 (갈래마다 하나)."""
     out: List[List[_Edge]] = []
 
     def rec(path: List[_Edge], length: float):
@@ -137,7 +137,7 @@ def _chains(map_api: AbstractMap, start: _Edge, need: float) -> List[List[_Edge]
 class _Polyline:
     xy: np.ndarray  # (n, 2)
     s: np.ndarray  # (n,) 누적 거리
-    edge_idx: np.ndarray  # (n-1,) 각 선분이 속한 차선열 안의 차선 번호
+    edge_idx: np.ndarray  # (n-1,) 각 선분이 속한 chain of 차로 안의 차로 번호
     edges: List[_Edge]
 
     @classmethod
@@ -147,7 +147,7 @@ class _Polyline:
             xy = e.xy if not xys else e.xy[1:] if np.linalg.norm(e.xy[0] - xys[-1][-1]) < 0.5 else e.xy
             if len(xy) == 0:
                 continue
-            if xys:  # 앞 차선의 끝점과 이어지는 선분은 다음 차선에 속한다
+            if xys:  # 앞 차로의 끝점과 이어지는 선분은 다음 차로에 속한다
                 idx.append(k)
             idx.extend([k] * (len(xy) - 1))
             xys.append(xy)
@@ -213,7 +213,7 @@ def motion_features(poses: np.ndarray, v0: float) -> Dict[str, float]:
 
 
 def _start_candidates(map_api: AbstractMap, x: float, y: float, h: float) -> List[Tuple[_Edge, float]]:
-    """출발점을 포함하고 방향이 맞는 차선과 연결 차선. (차선, 출발점의 |d|) 목록."""
+    """출발점을 포함하고 방향이 맞는 차로와 연결 차로. (차로, 출발점의 |d|) 목록."""
     objs = map_api.get_proximal_map_objects(Point2D(x, y), START_SEARCH_RADIUS,
                                             [SemanticMapLayer.LANE, SemanticMapLayer.LANE_CONNECTOR])
     p = Point(x, y)
@@ -252,7 +252,7 @@ def extract_features(poses: np.ndarray, v0: float, ego_pose: Sequence[float], ma
     f.update(motion_features(poses, v0))
     step = np.linalg.norm(np.diff(loc[:, :2], axis=0), axis=1)  # (8,)
 
-    # 출발 차선과 기준 차선열
+    # 출발 차로와 기준 chain of 차로
     cands = _start_candidates(map_api, glob[0, 0], glob[0, 1], glob[0, 2])
     f["n_start_cands"] = len(cands)
     if not cands:
@@ -260,7 +260,7 @@ def extract_features(poses: np.ndarray, v0: float, ego_pose: Sequence[float], ma
         return f
     traveled = float(step.sum())
     starts = {e.id: e for e, _ in cands}
-    for e, _ in cands:  # 출발점이 차선 시작점보다 뒤에 있으면 앞 차선(incoming)에서 시작하는 차선열도 본다
+    for e, _ in cands:  # 출발점이 차로 시작점보다 뒤에 있으면 앞 차로(incoming)에서 시작하는 chain of 차로도 본다
         if _Polyline.from_chain([e]).project(glob[0, :2])[4]:
             for o in e.obj.incoming_edges:
                 starts.setdefault(o.id, _edge(map_api, o))
@@ -270,9 +270,9 @@ def extract_features(poses: np.ndarray, v0: float, ego_pose: Sequence[float], ma
         for chain in _chains(map_api, e, need=s0 + traveled + CHAIN_EXTRA):
             pl = _Polyline.from_chain(chain)
             proj = [pl.project(glob[0, :2], -np.inf, s0 + 1.0)]
-            for i in range(1, 9):  # 앞 점보다 조금 뒤 ~ 지나간 거리보다 조금 앞 범위에서 찾는다 (U자 차선에서 건너뛰지 않도록)
+            for i in range(1, 9):  # 앞 점보다 조금 뒤 ~ 지나간 거리보다 조금 앞 범위에서 찾는다 (U자 차로에서 건너뛰지 않도록)
                 proj.append(pl.project(glob[i, :2], proj[-1][0] - 2.0, proj[-1][0] + step[i - 1] + 2.0))
-            # 옆 거리 평균 + 방향 차이 평균 + 차선열 밖(앞뒤 끝을 넘은) 점마다 벌점
+            # 옆 거리 평균 + 방향 차이 평균 + chain of 차로 밖(앞뒤 끝을 넘은) 점마다 벌점
             hdiff = np.degrees(np.abs(_wrap(glob[:, 2] - np.array([p[3] for p in proj]))))
             cost = float(np.mean([abs(p[1]) for p in proj]) + CHAIN_HEADING_COST * hdiff.mean()
                          + CHAIN_BEYOND_PENALTY * sum(p[4] for p in proj))
@@ -287,13 +287,13 @@ def extract_features(poses: np.ndarray, v0: float, ego_pose: Sequence[float], ma
     th = np.array([p[3] for p in proj])
     beyond = np.array([p[4] for p in proj])
     wl, wr = np.zeros(9), np.zeros(9)
-    for i, p in enumerate(proj):  # 투영점에서 그 차선의 왼쪽, 오른쪽 경계까지 거리 = 반폭
+    for i, p in enumerate(proj):  # 투영점에서 그 차로의 왼쪽, 오른쪽 경계까지 거리 = 반폭
         e = pl.edges[pl.edge_idx[p[2]]]
         foot = Point(*(glob[i, :2] - np.array([-np.sin(th[i]), np.cos(th[i])]) * d[i]))
         wl[i], wr[i] = e.left.distance(foot), e.right.distance(foot)
     hrel = _wrap(glob[:, 2] - th)  # 경로 방향 - 중심선 방향
 
-    # 연결 차선 구간 [s_start, s_end]
+    # 연결 차로 구간 [s_start, s_end]
     conn = []
     for k, e in enumerate(pl.edges):
         seg_ids = np.where(pl.edge_idx == k)[0]
@@ -317,7 +317,7 @@ def extract_features(poses: np.ndarray, v0: float, ego_pose: Sequence[float], ma
         f[f"seg{k}_ds"] = float(hi - lo)
         f[f"seg{k}_vlat_peak"] = float(np.max(np.abs(np.diff(d[a:b + 1]))) / DT)
         f[f"seg{k}_hrel_end"] = float(hrel[b])
-        f[f"seg{k}_lane_dh"] = float(_wrap(th[b] - th[a]))  # 차선 중심선의 방향 변화 (도로가 굽은 정도)
+        f[f"seg{k}_lane_dh"] = float(_wrap(th[b] - th[a]))  # 차로 중심선의 방향 변화 (도로가 굽은 정도)
         f[f"seg{k}_hrel_max"] = float(np.max(np.abs(hrel[a:b + 1])))
         f[f"seg{k}_beyond"] = float(beyond[a:b + 1].any())
     f["valid"] = 1
@@ -329,7 +329,7 @@ def extract_features(poses: np.ndarray, v0: float, ego_pose: Sequence[float], ma
 # ----------------------------------------------------------------------------------------------------------------
 
 def lane_index(d: float, wl: float, wr: float) -> int:
-    """기준 차선에서 몇 차선 옆인가 (왼쪽 +). 한 차선 폭 = wl + wr."""
+    """기준 차로에서 몇 차로 옆인가 (왼쪽 +). 한 차로 폭 = wl + wr."""
     w = max(wl + wr, 1e-3)
     if d > wl:
         return 1 + int((d - wl) // w)
@@ -339,7 +339,7 @@ def lane_index(d: float, wl: float, wr: float) -> int:
 
 
 def boundary_margin(d: float, wl: float, wr: float) -> float:
-    """d에서 가장 가까운 차선 경계까지의 거리."""
+    """d에서 가장 가까운 차로 경계까지의 거리."""
     w = max(wl + wr, 1e-3)
     if d >= 0:
         return abs(((d - wl) + w / 2) % w - w / 2)
@@ -389,12 +389,12 @@ def classify(f: Dict[str, float], th: Optional[Dict[str, float]] = None) -> Deci
             nt_lat, nt_strength = "keep_lane", 0.0
             nt_alt = offset_dir if near_offset else ""
 
-        # turn (1) 교차로: 연결 차선을 지나며 경로 방향이 turn_min_deg 이상 바뀜
-        #      (2) 교차로 밖: 연결 차선을 지나지 않는 구간 끝에서 경로 방향이 차선 방향과 turn_offlane_deg 이상 틀어짐
-        #          굽은 길을 따라가면 차선도 같이 굽으므로 (2)에 해당하지 않는다 (사람 경로 p99 16도)
+        # turn (1) 교차로: 연결 차로를 지나며 경로 방향이 turn_min_deg 이상 바뀜
+        #      (2) 교차로 밖: 연결 차로를 지나지 않는 구간 끝에서 경로 방향이 차로 방향과 turn_offlane_deg 이상 틀어짐
+        #          굽은 길을 따라가면 차로도 같이 굽으므로 (2)에 해당하지 않는다 (사람 경로 p99 16도)
         hrel = np.degrees(g("hrel_end"))
         conn_turn = on_conn and abs(dh) >= th["turn_min_deg"]
-        off_turn = (not on_conn) and abs(hrel) >= th["turn_offlane_deg"]  # 교차로(연결 차선) 위에서는 (1)만 쓴다
+        off_turn = (not on_conn) and abs(hrel) >= th["turn_offlane_deg"]  # 교차로(연결 차로) 위에서는 (1)만 쓴다
         near_conn = on_conn and abs(abs(dh) - th["turn_min_deg"]) < th["turn_margin_deg"]
         near_off = (not on_conn) and abs(abs(hrel) - th["turn_offlane_deg"]) < th["turn_offlane_margin_deg"]
         if conn_turn:
@@ -413,10 +413,10 @@ def classify(f: Dict[str, float], th: Optional[Dict[str, float]] = None) -> Deci
             if nt_alt:
                 reasons.append(f"seg{k}:offset_margin")  # 옆 거리 변화가 offset 기준 근처 (offset/keep 경계)
 
-        # 구조적 애매함: 어느 차선 기준인지부터 불분명하다 (학습과 평가에서 뺀다)
+        # 구조적 애매함: 어느 차로 기준인지부터 불분명하다 (학습과 평가에서 뺀다)
         structural = False
         if not lat.startswith("turn"):
-            # 차선 경계 근처에서 끝나거나 시작하면 lane change와 offset/keep이 흔들린다
+            # 차로 경계 근처에서 끝나거나 시작하면 lane change와 offset/keep이 흔들린다
             if min(boundary_margin(g("d_start"), g("wl_start"), g("wr_start")),
                    boundary_margin(g("d_end"), g("wl_end"), g("wr_end"))) < th["lat_boundary_margin"]:
                 structural = True
@@ -455,25 +455,25 @@ def features_from_scene(scene, poses: Optional[np.ndarray] = None, debug: Option
 
 
 # ----------------------------------------------------------------------------------------------------------------
-# 차선 기준으로 경로 다시 그리기 (5단계 L2: 다른 장면의 경로를 이 장면의 차선 위에 옮긴다)
+# 차로 기준으로 경로 다시 그리기 (5단계 L2: 다른 장면의 경로를 이 장면의 차로 위에 옮긴다)
 # ----------------------------------------------------------------------------------------------------------------
 
 @dataclass
 class LaneReference:
-    """장면 하나의 기준 차선열: 출발 차선에서 가장 곧게 이어지는 차선열과 ego의 투영 위치."""
+    """장면 하나의 기준 chain of 차로: 출발 차로에서 가장 곧게 이어지는 chain of 차로와 ego의 투영 위치."""
     pl: _Polyline
     s0: float  # ego 뒤차축의 진행 거리
     d0: float  # ego 뒤차축의 옆 거리 (왼쪽 +)
     ego_pose: np.ndarray
 
 
-REF_LENGTH = 120.0  # 기준 차선열 길이 (4초 동안 30 m/s도 들어간다) [m]
+REF_LENGTH = 120.0  # 기준 chain of 차로 길이 (4초 동안 30 m/s도 들어간다) [m]
 REF_HEADING_WINDOW = 40.0  # 곧은 정도를 잴 구간 길이 [m]
 
 
 def lane_reference(ego_pose: Sequence[float], map_api: AbstractMap) -> Optional[LaneReference]:
-    """출발 차선에서 이어지는 차선열 중, 앞 40 m 동안 방향이 가장 적게 바뀌는 것(직진에 가장 가까운 것)을 고른다.
-    비용 = |출발 옆 거리| + CHAIN_HEADING_COST x |앞 40 m 방향 변화(도)|. 출발 차선이 없으면 None."""
+    """출발 차로에서 이어지는 chain of 차로 중, 앞 40 m 동안 방향이 가장 적게 바뀌는 것(직진에 가장 가까운 것)을 고른다.
+    비용 = |출발 옆 거리| + CHAIN_HEADING_COST x |앞 40 m 방향 변화(도)|. 출발 차로가 없으면 None."""
     x, y, h = ego_pose
     cands = _start_candidates(map_api, x, y, h)
     if not cands:
@@ -501,11 +501,11 @@ def lane_reference(ego_pose: Sequence[float], map_api: AbstractMap) -> Optional[
 
 
 def embed_on_lane(ref: LaneReference, s_rel: np.ndarray, d_rel: np.ndarray, hrel: np.ndarray) -> Optional[np.ndarray]:
-    """다른 장면의 경로를 그 장면 차선 기준의 (진행 거리, 옆 거리, 차선 대비 방향) 시간표로 받아 이 장면의 기준 차선 위에
+    """다른 장면의 경로를 그 장면 차로 기준의 (진행 거리, 옆 거리, 차로 대비 방향) 시간표로 받아 이 장면의 기준 차로 위에
     다시 그린다. 출발 옆 거리는 이 장면의 ego 위치(d0)에 맞추고, 그 뒤의 변화량은 원래 경로 그대로 쓴다.
 
-    :param s_rel, d_rel, hrel: 점 9개(t = 0..4초)의 진행 거리, 옆 거리, 차선 대비 방향 (원래 장면 기준)
-    :return: (8, 3) ego 좌표계 경로. 기준 차선열이 모자라면 None
+    :param s_rel, d_rel, hrel: 점 9개(t = 0..4초)의 진행 거리, 옆 거리, 차로 대비 방향 (원래 장면 기준)
+    :return: (8, 3) ego 좌표계 경로. 기준 chain of 차로가 모자라면 None
     """
     s = ref.s0 + (np.asarray(s_rel, dtype=np.float64) - s_rel[0])
     d = ref.d0 + (np.asarray(d_rel, dtype=np.float64) - d_rel[0])
@@ -528,15 +528,15 @@ def embed_on_lane(ref: LaneReference, s_rel: np.ndarray, d_rel: np.ndarray, hrel
     return loc[1:]
 
 
-TURN_REF_WINDOW = 60.0  # 회전 차선열을 찾을 때 방향 변화를 재는 구간 [m]
-TURN_REF_MIN_DEG = 45.0  # 이만큼 이상 돌아야 회전 차선열로 본다 [deg]
+TURN_REF_WINDOW = 60.0  # 회전 chain of 차로를 찾을 때 방향 변화를 재는 구간 [m]
+TURN_REF_MIN_DEG = 45.0  # 이만큼 이상 돌아야 회전 chain of 차로로 본다 [deg]
 
 
 def turn_reference(ego_pose: Sequence[float], map_api: AbstractMap, side: str) -> Optional[LaneReference]:
-    """출발 차선에서 이어지는 차선열 중 side(left/right) 방향으로 도는 것(교차로 회전)을 고른다 (6단계).
+    """출발 차로에서 이어지는 chain of 차로 중 side(left/right) 방향으로 도는 것(교차로 회전)을 고른다 (6단계).
 
-    조건: 교차로 연결 차선을 지나고, 출발점부터 앞 60 m 동안 방향이 그 쪽으로 45도 이상 바뀐다.
-    여럿이면 출발 옆 거리가 가장 작은 것, 그다음 연결 차선이 가장 가까이에서 시작하는 것을 고른다. 없으면 None.
+    조건: 교차로 연결 차로를 지나고, 출발점부터 앞 60 m 동안 방향이 그 쪽으로 45도 이상 바뀐다.
+    여럿이면 출발 옆 거리가 가장 작은 것, 그다음 연결 차로가 가장 가까이에서 시작하는 것을 고른다. 없으면 None.
     """
     x, y, h = ego_pose
     cands = _start_candidates(map_api, x, y, h)

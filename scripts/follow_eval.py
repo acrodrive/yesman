@@ -1,13 +1,13 @@
-"""따르기 판정 (yesman.md 6.2, 9.2): 모델이 그린 경로에 L1을 돌려 d̂을 구하고, 주어진 결정 d와 비교한다.
+"""결정–경로 일치 판정 (yesman.md 6.2, 9.2): 모델이 그린 경로에 L1을 돌려 d̂을 구하고, 주어진 결정 d와 비교한다.
 
-- 따르기 = d̂ ≈ d (6.2, 14절: 구간마다 행동 종류가 같고 세기 차이 ±0.2. 4단계 결정대로 이웃 라벨 허용이 주 지표,
+- 결정–경로 일치 = d̂ ≈ d (6.2, 14절: 구간마다 행동 종류가 같고 강도 차이 ±0.2. 4단계 결정대로 이웃 라벨 허용이 주 지표,
   엄격 기준도 함께 낸다). 판단 head가 없는 모델(B1, B2, B-순응)은 항상 ACCEPT로 본다.
 - d̂을 정할 수 없으면(invalid, 구조적 애매함) "따르지 않음"으로 센다(결과를 보기 전에 정함). 그 비율을 따로 낸다.
-- 세기 오차 (9.2): 행동 종류가 정확히 같은 구간에서 |세기(d) − 세기(d̂)|. keep lane은 뺀다.
+- 강도 오차 (9.2): 행동 종류가 정확히 같은 구간에서 |강도(d) − 강도(d̂)|. keep lane은 뺀다.
 L1은 라벨을 만들 때와 같은 함수(yesman/l1.py classify + extract_features)이다(12절 "L1의 단일성").
 
 사용법: python scripts/follow_eval.py --run B2_seed0 [--sets D0 D1 val]
-출력: exp/eval/<run>/<set>_l1.parquet (행마다 d̂, follow, follow_strict, dhat_usable, 세기 오차),
+출력: exp/eval/<run>/<set>_l1.parquet (행마다 d̂, follow, follow_strict, dhat_usable, 강도 오차),
      exp/eval/<run>/follow_summary.json
 """
 

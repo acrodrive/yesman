@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 10단계 진단: (1) B-순응을 5만 step 학습해 검증 세트 CF⁺ 따르기가 2만 step보다 오르는지 (학습 부족인가)
+# 10단계 진단: (1) B-순응을 5만 step 학습해 검증 세트 CF⁺ 결정–경로 일치율이 2만 step보다 오르는지 (학습 부족인가)
 #              (2) 2만 step B-순응이 학습 데이터의 CF⁺는 따르는지 (평균으로 끌림/학습 부족 대 일반화)
 set -uo pipefail
 source /workspace/yesman/scripts/setup/env.sh

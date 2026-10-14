@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 11단계 CPU 평가: D2, D3 따르기 판정 + D2 경로 채점(대체 경로 품질) + D3 L2 최고 경로 채점("가능하지만 위험").
+# 11단계 CPU 평가: D2, D3 결정–경로 일치 판정 + D2 경로 채점(대체 경로 품질) + D3 L2 최고 경로 채점("가능하지만 위험").
 set -uo pipefail
 source /workspace/yesman/scripts/setup/env.sh
 cd /workspace/yesman

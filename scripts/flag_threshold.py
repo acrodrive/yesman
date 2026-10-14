@@ -1,11 +1,11 @@
 """10단계: 검증 세트에서 flag 기준값 p를 정하고, 판단 head의 정확도와 D0/D1의 flag 포함 지표를 낸다.
 
-- 기준값 (14절, 결과를 보기 전에 정함): 검증 세트에서 청개구리 비율(실행할 수 있는 결정 = 원래 + CF⁺를 거부한 비율)이
+- 기준값 (14절, 결과를 보기 전에 정함): 검증 세트에서 과잉 거부 비율(실행할 수 있는 결정 = 원래 + CF⁺를 거부한 비율)이
   5% 이하가 되는 가장 큰 기준값 τ. p(= sigmoid(flag logit), 실행 가능 점수) < τ이면 REJECT.
   보이지 않는 원인 CF⁻는 검증 세트에서도 뺀다(학습과 같게).
 - 판단 head 정확도 (검증 세트): AUC, τ에서 샘플 종류별 거부율, CF⁻ 불가능 기준별 거부율, 정확도,
   근거 head 정확도(참고, REJECT 샘플에서 가장 높은 logit의 근거가 L2 판단 근거에 들어 있는 비율).
-- D0, D1 (6.2): 따르기 = ACCEPT이고 d̂ ≈ d, 언행 불일치 = ACCEPT인데 d̂ ≉ d, 청개구리 = REJECT.
+- D0, D1 (6.2): 결정–경로 일치 = ACCEPT이고 d̂ ≈ d, flag–경로 불일치 = ACCEPT인데 d̂ ≉ d, 과잉 거부 = REJECT.
 
 사용법: python scripts/flag_threshold.py --run Ours_seed0 [--target 0.05]
 출력: exp/eval/<run>/flag_threshold.json
@@ -35,7 +35,7 @@ def auc(score, label):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", required=True)
-    ap.add_argument("--target", type=float, default=0.05, help="검증 세트 청개구리 비율 상한")
+    ap.add_argument("--target", type=float, default=0.05, help="검증 세트 과잉 거부 비율 상한")
     ap.add_argument("--val_only", action="store_true", help="검증 세트 지표만 (CF⁻ 비율 고르기용)")
     args = ap.parse_args()
     d = EXP / f"eval/{args.run}"
@@ -63,7 +63,7 @@ def main():
         out[name] = {"n": int(len(f)), "follow": float((acc & f.follow).mean()),
                      "mismatch": float((acc & ~f.follow).mean()), "frog": float((~acc).mean()),
                      "follow_if_ignore_flag": float(f.follow.mean())}
-    if args.val_only:  # 검증 세트에서 경로만의 CF⁺ 따르기 (flag 무시)
+    if args.val_only:  # 검증 세트에서 경로만의 CF⁺ 결정–경로 일치율 (flag 무시)
         f = pd.read_parquet(d / "val_l1.parquet")
         f = f[f.visibility != "unseen"]
         out["val_cf_pos_follow_path"] = float(f[f.sample_type == "cf_pos"].follow.mean())

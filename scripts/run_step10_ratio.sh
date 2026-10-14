@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 10단계: CF⁻ 무게(neg_to_pos) 고르기. 시드 0, 검증 세트로만 판단한다 (navtest는 보지 않는다).
-# 고르는 규칙 (결과를 보기 전에 정함): 검증 세트 CF⁻ 거부율(τ 적용) 85% 이상인 설정 중, 경로만의 CF⁺ 따르기가 가장 높은 것.
+# 고르는 규칙 (결과를 보기 전에 정함): 검증 세트 CF⁻ 거부율(τ 적용) 85% 이상인 설정 중, 경로만의 CF⁺ 결정–경로 일치율이 가장 높은 것.
 set -uo pipefail
 source /workspace/yesman/scripts/setup/env.sh
 cd /workspace/yesman

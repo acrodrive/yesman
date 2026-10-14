@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 10단계: Ours 학습(시드 0, 1) → 예측 → L1 따르기 판정 → 공식 D0 채점.
+# 10단계: Ours 학습(시드 0, 1) → 예측 → L1 결정–경로 일치 판정 → 공식 D0 채점.
 # 사용법: nohup setsid scripts/run_step10.sh > logs/step10/run.log 2>&1 &
 set -uo pipefail
 source /workspace/yesman/scripts/setup/env.sh
