@@ -69,6 +69,8 @@ T3(Gemma 4 31B)는 VLM이 끝난 뒤 판정하고, 그다음 T0~T3를 체크섬�
   - VLM은 1,000장면마다 저장하므로 7,000장면까지 남았다(약 700장면 다시 함). 데이터 스크립트가 불완전한 결과로 T3를 만들기 전에 VLM 단계를 멈췄고(T3는 만들어지지 않음), 저장된 곳부터 다시 시작했다. VLM 결정은 greedy 디코딩이라 다시 해도 같다.
   - plausible CF는 확장 CF와 VLM이 끝난 뒤 GPU로 다시 돌린다. 이후 동시 작업은 메모리 60 GB 안에서 잡는다.
 
+- **CPU 한도 13.6코어**: 컨테이너의 CPU 한도(cgroup `cpu.max`)는 13.6코어이다(`nproc`은 32, `top`의 놀고 있는 CPU도 호스트 기준). 데이터 준비는 CPU 계산량이 시간을 정한다. 판정을 동시에 돌려도 전체 시간은 줄지 않는다. 처음에 "디스크 읽기 대기"라고 본 것은 잘못이었다(io·memory pressure 0, cpu pressure 76%).
+
 ## 고친 버그 (실행 전에 발견)
 
 - **metric cache 목록 덮어쓰기**: 학습 추가 장면의 cache를 기존 `navtrain_sensor` 폴더에 만들면, caching이 목록(metadata csv)을 새 장면만으로 덮어써 기존 2.3만 장면이 목록에서 빠진다(`MetricCacheLoader`는 첫 csv만 읽는다). 학습 추가 장면은 따로 만들고, 두 목록을 합친 `navtrain_step14_train`(목록만 있음)으로 읽는다. `l3_synth.py`에 `--cache`를 추가했고, 검증 세트(`val`)의 cache도 이 목록을 쓴다(`yesman/eval_sets.py`).
