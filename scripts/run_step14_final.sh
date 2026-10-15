@@ -8,6 +8,7 @@
 # 채점은 채점 결과를 쓰는 세트만 한다: T0(주행 점수), T2·T3(불가능한 결정의 안전율). T1(CF⁺)은 결정–경로 일치율, 과잉 거부,
 # flag–경로 불일치만 쓰므로(L1과 판단) 채점하지 않는다.
 # 판단 모델의 τ는 검증 세트에서 이미 정한 exp/eval/<run>/flag_threshold.json을 그대로 쓴다.
+# 예측(GPU)은 하나씩 차례로, L1 판정과 채점(CPU)은 자리 CPU_SLOTS개(기본 2)에서 다음 예측과 겹쳐 돈다. 결과는 차례로 돌린 것과 같다.
 #
 # 사용법: CONFIRM=1 nohup setsid bash scripts/run_step14_final.sh > logs/step14/final.log 2>&1 &
 set -uo pipefail
@@ -32,7 +33,30 @@ run_of () { awk -v k=$1 '$1 == k {print $2}' $LIST; }
 VOTE=$(run_of vote)
 note () { echo "=== $(date '+%m-%d %H:%M') $*"; }
 
-eval_run () {  # eval_run <실행 이름> [투표 인자]
+CPU_SLOTS=${CPU_SLOTS:-2}; LOCKD=$OUT/locks; mkdir -p $LOCKD
+cpu_run () {  # cpu_run <명령...>  CPU 자리 하나를 잡고 돈다 (자리가 없으면 기다린다)
+  local i rc
+  while true; do
+    for i in $(seq 1 $CPU_SLOTS); do
+      ( flock -n 9 || exit 99; "$@" ) 9> $LOCKD/cpu$i; rc=$?
+      [ $rc -ne 99 ] && return $rc
+    done
+    sleep 20
+  done
+}
+eval_cpu () {  # eval_cpu <실행 이름> <접미사>  L1 판정(모든 세트) → 채점(SCORE_SETS)
+  local r=$1 suffix=$2 d=exp/eval/$1 s
+  for s in $SETS; do
+    [ -f $d/${s}${suffix}_l1.parquet ] || python scripts/follow_eval.py --run $r --sets ${s}${suffix} >> $OUT/$r.log 2>&1 \
+      || { note "L1 판정 실패 $r $s"; return 1; }
+    [[ " $SCORE_SETS " == *" $s "* ]] || continue
+    [ -f $d/${s}${suffix}_scores.parquet ] || python scripts/score_rows.py --table $d/${s}${suffix}.parquet \
+      --out $d/${s}${suffix}_scores.parquet >> $OUT/$r.log 2>&1 || { note "채점 실패 $r $s"; return 1; }
+  done
+  note "평가 끝 $r$suffix"
+}
+PIDS=""
+eval_run () {  # eval_run <실행 이름> [투표 인자]  예측(GPU, 지금 바로) → eval_cpu(뒤에서, CPU 자리)
   local r=$1 vote_args=${2:-} suffix=""
   [ -n "$vote_args" ] && suffix=_$VOTE
   local d=exp/eval/$r
@@ -42,13 +66,8 @@ eval_run () {  # eval_run <실행 이름> [투표 인자]
     note "predict $r$suffix:$need"
     python scripts/predict_planner.py --run $r --sets $need $vote_args >> $OUT/$r.log 2>&1 || { note "예측 실패 $r"; exit 1; }
   fi
-  for s in $SETS; do
-    [ -f $d/${s}${suffix}_l1.parquet ] || python scripts/follow_eval.py --run $r --sets ${s}${suffix} >> $OUT/$r.log 2>&1 \
-      || { note "L1 판정 실패 $r $s"; exit 1; }
-    [[ " $SCORE_SETS " == *" $s "* ]] || continue
-    [ -f $d/${s}${suffix}_scores.parquet ] || python scripts/score_rows.py --table $d/${s}${suffix}.parquet \
-      --out $d/${s}${suffix}_scores.parquet >> $OUT/$r.log 2>&1 || { note "채점 실패 $r $s"; exit 1; }
-  done
+  ( cpu_run eval_cpu $r "$suffix" ) &
+  PIDS="$PIDS $!"
 }
 
 for k in B0 B1 B2 B3 OursPrev Ours; do
@@ -61,6 +80,8 @@ for seed in 0 1; do
   TAU=$(python -c "import json; print(json.load(open('exp/eval/$r/flag_threshold.json'))['tau'])")
   eval_run $r "--vote_k 10 --vote_m $M --tau $TAU"
 done
+fail=0; for p in $PIDS; do wait $p || fail=1; done
+[ $fail = 0 ] || { note "평가 중 실패가 있다. 고친 뒤 RESUME=1로 이어 돈다"; exit 1; }
 
 note "step14_eval"
 python scripts/step14_eval.py --models B0=$(run_of B0) B1=$(run_of B1) B2=$(run_of B2) B3=$(run_of B3) \
