@@ -62,10 +62,14 @@ def main():
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--workers", type=int, default=28)
     ap.add_argument("--cache", default=None, help="metric cache 폴더 이름 (기본: 표 파일 이름에서 정함, yesman/eval_sets.py)")
+    ap.add_argument("--only_sample_type", default="",
+                    help="이 샘플 종류(sample_type 열)의 행만 채점하고 나머지는 빈 값으로 둔다 (14단계 검증 세트: cf_neg만 안전율에 쓴다)")
     args = ap.parse_args()
     cache = args.cache or cache_of(args.table.stem)
-    df = pd.read_parquet(args.table, columns=["token", args.col])
+    df = pd.read_parquet(args.table, columns=["token", args.col] + (["sample_type"] if args.only_sample_type else []))
     has = df[args.col].map(lambda p: p is not None and len(p) == 24)
+    if args.only_sample_type:
+        has &= df.sample_type == args.only_sample_type
     groups = {}
     for i, (t, p) in enumerate(zip(df.token, df[args.col])):
         if has.iloc[i]:

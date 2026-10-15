@@ -5,6 +5,8 @@
 # 중간에 끊겼을 때만 RESUME=1로 이어 돈다(끝난 파일은 건너뛴다). 이어 돈 사실은 STARTED 파일에 남는다.
 #
 # 단계: 예측(predict_planner) → L1 일치 판정(follow_eval) → 행마다 채점(score_rows) → step14_eval.py(지표, 미리 정한 비교, 판정)
+# 채점은 채점 결과를 쓰는 세트만 한다: T0(주행 점수), T2·T3(불가능한 결정의 안전율). T1(CF⁺)은 결정–경로 일치율, 과잉 거부,
+# flag–경로 불일치만 쓰므로(L1과 판단) 채점하지 않는다.
 # 판단 모델의 τ는 검증 세트에서 이미 정한 exp/eval/<run>/flag_threshold.json을 그대로 쓴다.
 #
 # 사용법: CONFIRM=1 nohup setsid bash scripts/run_step14_final.sh > logs/step14/final.log 2>&1 &
@@ -14,6 +16,7 @@ cd /workspace/yesman
 OUT=logs/step14/final; mkdir -p $OUT
 LIST=exp/step14/select/final_models.txt
 SETS="T0 T1 T2 T3_gemma31b"
+SCORE_SETS="T0 T2 T3_gemma31b"  # 채점 결과를 쓰는 세트
 [ "${CONFIRM:-0}" = 1 ] || { echo "새 테스트 세트는 한 번만 평가한다. 확인했으면 CONFIRM=1을 붙여 다시 실행한다."; exit 1; }
 [ -f $LIST ] || { echo "$LIST 없음 (run_step14_train.sh가 끝나야 한다)"; exit 1; }
 sha256sum -c --quiet data_lists/eval_step14/SHA256SUMS 2>/dev/null \
@@ -42,6 +45,7 @@ eval_run () {  # eval_run <실행 이름> [투표 인자]
   for s in $SETS; do
     [ -f $d/${s}${suffix}_l1.parquet ] || python scripts/follow_eval.py --run $r --sets ${s}${suffix} >> $OUT/$r.log 2>&1 \
       || { note "L1 판정 실패 $r $s"; exit 1; }
+    [[ " $SCORE_SETS " == *" $s "* ]] || continue
     [ -f $d/${s}${suffix}_scores.parquet ] || python scripts/score_rows.py --table $d/${s}${suffix}.parquet \
       --out $d/${s}${suffix}_scores.parquet >> $OUT/$r.log 2>&1 || { note "채점 실패 $r $s"; exit 1; }
   done
