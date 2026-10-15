@@ -38,16 +38,18 @@ ROOT = Path(os.environ["YESMAN_ROOT"])
 EXP = Path(os.environ["NAVSIM_EXP_ROOT"])
 FEAT = ROOT / "exp/features/ltf/navtrain"
 CACHE = "navtrain_sensor"
+# 닮은 장면 찾기의 장치. GPU를 다른 작업(VLM 등)이 쓰고 있으면 PLAUS_DEVICE=cpu (14단계, 계산은 같다)
+DEV = os.environ.get("PLAUS_DEVICE") or ("cuda" if torch.cuda.is_available() else "cpu")
 K, DV, PAST = 10, 2.0, (1.0, 2.5, 1.5)  # K: 처음 4로 정했으나 시험(로그 24개)에서 불가능이 2.7%라 10으로 늘림 (모델 결과 보기 전)
 
 
 def lookalikes(tokens, logs, pool=None):
     """장면마다 비슷해 보이는 다른 로그 장면 K개의 행 번호. pool: 이웃으로 쓸 수 있는 장면 (bool, 길이 = 특징 장면 수)."""
-    kv = torch.from_numpy(np.load(FEAT / "keyval.npy")).cuda().float().mean(1)
+    kv = torch.from_numpy(np.load(FEAT / "keyval.npy")).to(DEV).float().mean(1)
     emb = torch.nn.functional.normalize(kv, dim=1)
-    st = torch.from_numpy(np.load(FEAT / "status.npy")).cuda().float()
+    st = torch.from_numpy(np.load(FEAT / "status.npy")).to(DEV).float()
     cmd, v = st[:, :4].argmax(1), st[:, 4:6].norm(dim=1)
-    log_id = torch.as_tensor(pd.factorize(pd.Series(logs))[0]).cuda()
+    log_id = torch.as_tensor(pd.factorize(pd.Series(logs))[0]).to(DEV)
     out = []
     for lo in range(0, len(tokens), 2048):
         sl = slice(lo, lo + 2048)
@@ -129,7 +131,7 @@ def main():
     pool = None
     if args.pool:
         ps = set(args.pool.read_text().split())
-        pool = torch.as_tensor([t in ps for t in tokens]).cuda()
+        pool = torch.as_tensor([t in ps for t in tokens]).to(DEV)
     nn = lookalikes(tokens, logs, pool)
     targets = set(args.targets.read_text().split()) if args.targets else None
     lab = lambda t: labels.loc[t].to_dict()  # noqa: E731
