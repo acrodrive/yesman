@@ -61,6 +61,10 @@ def main():
     orig["target_poses"] = [hp[t] for t in orig.token]
     for c in ("reason", "category", "visibility"):
         orig[c] = ""
+    # 원래 결정 행이 있는 장면만 쓴다(target 경로를 고칠 때 필요). 원래 결정이 판정 불가라 메뉴 CF가 없는 장면(약 3%)도
+    # plausible CF는 만들어지므로, target 경로를 정하기 전에 뺀다 (14단계: 그 장면의 사람 경로는 hp에 없다)
+    keep = set(orig.token)
+    menu, wide, pl = (d[d.token.isin(keep)] for d in (menu, wide, pl))
     parts = [orig, cf_rows(menu, "menu", hp), cf_rows(wide, "wide", hp), cf_rows(pl, "plausible", hp)]
     rows = pd.concat(parts, ignore_index=True)
     rows = rows[rows.token.isin(set(orig.token))]  # 원래 결정 행이 있는 장면만 (target 경로를 고칠 때 필요)
