@@ -227,9 +227,18 @@ for m in 1 2 3 5; do
   ( cpu_run eval_cpu $O_FINAL val_vote10_${m} ) & JOBS="${JOBS:-} $!"
 done
 join
-b=$(select_cfg ours_vote_m --rule frog5 --cands $O_FINAL:val_vote10_1 $O_FINAL:val_vote10_2 $O_FINAL:val_vote10_3 $O_FINAL:val_vote10_5) || die "투표 m"
-VOTE_M=$(python -c "import json; print(json.load(open('$SEL/ours_vote_m.json'))['best'].split('_')[-1])")
-note "투표 m = $VOTE_M"
+# 과잉 거부 5% 이하인 m이 없으면 고르지 않는다(2026-10-16 사용자 결정 C). m = 1/2/3/5의 검증 결과 표($SEL/ours_vote_m.txt)만
+# 보고하고, 테스트 평가에서 투표는 뺀다. 사전 등록의 5% 기준과 m 후보는 바꾸지 않는다
+if b=$(select_cfg ours_vote_m --rule frog5 --cands $O_FINAL:val_vote10_1 $O_FINAL:val_vote10_2 $O_FINAL:val_vote10_3 $O_FINAL:val_vote10_5); then
+  VOTE_M=$(python -c "import json; print(json.load(open('$SEL/ours_vote_m.json'))['best'].split('_')[-1])")
+  VOTE_LINE="vote vote10_${VOTE_M}"
+  note "투표 m = $VOTE_M"
+elif [ -f $SEL/ours_vote_m.json ] && python -c "import json,sys; sys.exit(0 if json.load(open('$SEL/ours_vote_m.json'))['best'] is None else 1)"; then
+  VOTE_LINE="vote none"
+  note "투표: 과잉 거부 5% 이하인 m이 없어 고르지 않음 (결과 표 $SEL/ours_vote_m.txt)"
+else
+  die "투표 m"
+fi
 
 # ---- 최종 모델 목록과 시드 1 학습 ----
 B3_FINAL=${Q}B3_s14_${B3_TAG}_seed0
@@ -240,7 +249,7 @@ B2 ${Q}Bcomply_s14
 B3 ${B3_FINAL%_seed0}
 OursPrev ${Q}Ours_s14_${O_TAG}
 Ours ${O_FINAL%_seed0}
-vote vote10_${VOTE_M}
+${VOTE_LINE}
 EOF
 note "최종 모델"; cat $SEL/final_models.txt
 job ${Q}B2_s14_seed0 B2 -

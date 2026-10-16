@@ -73,18 +73,21 @@ eval_run () {  # eval_run <실행 이름> [투표 인자]  예측(GPU, 지금 �
 for k in B0 B1 B2 B3 OursPrev Ours; do
   for seed in 0 1; do eval_run $(run_of $k)_seed$seed; done
 done
-# Ours 노이즈 투표 (K = 10, m은 검증 세트로 고름). τ는 시드마다 그 실행의 값
-M=${VOTE#vote10_}
-for seed in 0 1; do
-  r=$(run_of Ours)_seed$seed
-  TAU=$(python -c "import json; print(json.load(open('exp/eval/$r/flag_threshold.json'))['tau'])")
-  eval_run $r "--vote_k 10 --vote_m $M --tau $TAU"
-done
+# Ours 노이즈 투표 (K = 10, m은 검증 세트로 고름). τ는 시드마다 그 실행의 값.
+# 과잉 거부 5% 이하인 m이 없었으면(final_models.txt의 "vote none") 투표는 평가하지 않는다 (2026-10-16 사용자 결정 C)
+if [ "$VOTE" != none ]; then
+  M=${VOTE#vote10_}
+  for seed in 0 1; do
+    r=$(run_of Ours)_seed$seed
+    TAU=$(python -c "import json; print(json.load(open('exp/eval/$r/flag_threshold.json'))['tau'])")
+    eval_run $r "--vote_k 10 --vote_m $M --tau $TAU"
+  done
+fi
 fail=0; for p in $PIDS; do wait $p || fail=1; done
 [ $fail = 0 ] || { note "평가 중 실패가 있다. 고친 뒤 RESUME=1로 이어 돈다"; exit 1; }
 
 note "step14_eval"
 python scripts/step14_eval.py --models B0=$(run_of B0) B1=$(run_of B1) B2=$(run_of B2) B3=$(run_of B3) \
-  OursPrev=$(run_of OursPrev) Ours=$(run_of Ours) --vote Ours=$VOTE --out $OUT/eval.md 2>&1 | grep -v Warn
+  OursPrev=$(run_of OursPrev) Ours=$(run_of Ours) $([ "$VOTE" != none ] && echo "--vote Ours=$VOTE") --out $OUT/eval.md 2>&1 | grep -v Warn
 echo "done $(date '+%m-%d %H:%M')" >> $OUT/STARTED
 note "끝. 결과 $OUT/eval.md"
