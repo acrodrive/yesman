@@ -10,7 +10,7 @@
 # 기본 구성(2단계 이전, 4.2절 step 수·크기와 4.1절 장면 수 단계에 쓴다): CF⁻ 무게 0.25(13단계 값), plausible CF⁻ 비중 0.6
 #   (2단계 후보 0.4/0.6/0.85의 가운데. 묶음 그대로면 6%라 최종 구성과 학습 모습이 너무 달라서 2026-10-16 사용자와 정함), 나머지 장치 끔
 #
-# 병렬: 학습과 예측(GPU)은 자물쇠 하나로 한 번에 하나만 돌고, 데이터 준비의 VLM 같은 다른 GPU 작업이 있으면 기다린다.
+# 병렬: 학습과 예측(GPU)은 자물쇠 하나로 한 번에 하나만 돌고(기다리는 예측이 있으면 학습이 양보한다), 데이터 준비의 VLM 같은 다른 GPU 작업이 있으면 기다린다.
 # L1 일치 판정·채점·τ(CPU)는 자리 CPU_SLOTS개(기본 2)에서 다음 학습과 겹쳐 돈다. 서로 기다릴 필요 없는 후보(한 단계의 후보들,
 # B3와 Ours의 구성 고르기)는 동시에 띄우고, 고르기 전에 모두 끝나기를 기다린다. 결과는 차례로 돌린 것과 같다.
 #
@@ -41,8 +41,21 @@ CPU_SLOTS=${CPU_SLOTS:-2}
 gpu_free () {  # 다른 GPU 작업(데이터 준비의 VLM 등)과 겹치지 않게 기다린다
   while [ -n "$(nvidia-smi --query-compute-apps=pid --format=csv,noheader 2>/dev/null)" ]; do sleep 60; done
 }
-gpu_run () {  # gpu_run <명령...>  GPU 자물쇠를 잡고, 다른 GPU 작업이 없을 때 돈다
-  ( flock 8; gpu_free; "$@" ) 8> $LOCK/gpu
+mkdir -p $LOCK/pending
+gpu_run () {  # gpu_run <명령...>  학습용. GPU 자물쇠를 잡되, 기다리는 예측이 있으면 양보한다(예측이 먼저 돌아 CPU 평가가 다음 학습과 겹치게)
+  local rc
+  while true; do
+    ( flock 8; [ -n "$(ls -A $LOCK/pending 2>/dev/null)" ] && exit 75; gpu_free; "$@" ) 8> $LOCK/gpu; rc=$?
+    [ $rc -ne 75 ] && return $rc
+    sleep 5
+  done
+}
+gpu_predict () {  # gpu_predict <이름> <명령...>  예측용. 기다리는 동안 표시를 남겨 학습보다 먼저 GPU를 받는다
+  local tag=$1 rc; shift
+  touch $LOCK/pending/$tag
+  ( flock 8; rm -f $LOCK/pending/$tag; gpu_free; "$@" ) 8> $LOCK/gpu; rc=$?
+  rm -f $LOCK/pending/$tag
+  return $rc
 }
 cpu_run () {  # cpu_run <명령...>  CPU 자리 하나를 잡고 돈다 (자리가 없으면 기다린다)
   local i rc
@@ -80,7 +93,7 @@ eval_cpu () {  # eval_cpu <실행 이름> <set> [judge]  L1 일치 판정 → �
 evalval () {  # evalval <실행 이름> [judge]  검증 세트 예측(GPU) → eval_cpu(CPU 자리)
   local name=$1 judge=${2:-}
   local d=exp/eval/$name
-  if [ ! -f $d/val.parquet ]; then gpu_run python scripts/predict_planner.py --run $name --sets val --val_bundle_suffix $VALSUF \
+  if [ ! -f $d/val.parquet ]; then gpu_predict $name python scripts/predict_planner.py --run $name --sets val --val_bundle_suffix $VALSUF \
       > $LOG/$name.eval.log 2>&1 || die "예측 실패 $name"; fi
   cpu_run eval_cpu $name val $judge || die "평가 실패 $name ($LOG/$name.eval.log)"
 }
@@ -222,7 +235,7 @@ note "Ours 설정: $O_FINAL ($O_FARGS)"
 TAU=$(python -c "import json; print(json.load(open('exp/eval/$O_FINAL/flag_threshold.json'))['tau'])")
 for m in 1 2 3 5; do
   d=exp/eval/$O_FINAL
-  [ -f $d/val_vote10_${m}.parquet ] || gpu_run python scripts/predict_planner.py --run $O_FINAL --sets val --val_bundle_suffix $VALSUF \
+  [ -f $d/val_vote10_${m}.parquet ] || gpu_predict ${O_FINAL}_vote$m python scripts/predict_planner.py --run $O_FINAL --sets val --val_bundle_suffix $VALSUF \
       --vote_k 10 --vote_m $m --tau $TAU >> $LOG/$O_FINAL.vote.log 2>&1 || die "투표 예측 실패 m=$m"
   ( cpu_run eval_cpu $O_FINAL val_vote10_${m} ) & JOBS="${JOBS:-} $!"
 done
