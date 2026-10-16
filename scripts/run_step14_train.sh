@@ -71,7 +71,10 @@ eval_cpu () {  # eval_cpu <실행 이름> <set> [judge]  L1 일치 판정 → �
   [ -f $d/${s}_scores.parquet ] || python scripts/score_rows.py --table $d/$s.parquet --out $d/${s}_scores.parquet \
       --only_sample_type cf_neg >> $LOG/$name.eval.log 2>&1 || return 1
   if [ -n "$judge" ] && [ $s = val ] && [ ! -f $d/flag_threshold.json ]; then
+    # --val_only는 τ를 flag_threshold_val.json에 쓴다. 고르기(select_config.py)와 평가(step14_eval.py, 투표)는
+    # flag_threshold.json을 읽으므로 같은 내용을 그 이름으로도 둔다 (없으면 판단 모델을 항상 ACCEPT로 잘못 센다)
     python scripts/flag_threshold.py --run $name --val_only >> $LOG/$name.eval.log 2>&1 || return 1
+    cp $d/flag_threshold_val.json $d/flag_threshold.json || return 1
   fi
 }
 evalval () {  # evalval <실행 이름> [judge]  검증 세트 예측(GPU) → eval_cpu(CPU 자리)

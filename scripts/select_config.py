@@ -53,7 +53,8 @@ def accept(f: pd.DataFrame, run: str) -> np.ndarray:
     if "vote_accept" in f:
         return f.vote_accept.to_numpy(bool)
     th = EXP / f"eval/{run}/flag_threshold.json"
-    if "p" in f and th.exists():
+    if "p" in f and f.p.notna().any():  # 판단 모델: τ가 없으면 멈춘다 (예전에는 조용히 항상 ACCEPT로 셌다)
+        assert th.exists(), f"판단 모델 {run}에 flag_threshold.json(τ)이 없다"
         return f.p.to_numpy() >= json.load(open(th))["tau"]
     return np.ones(len(f), bool)
 
