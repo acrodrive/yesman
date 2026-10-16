@@ -94,6 +94,9 @@ T0~T3는 2026-10-15 16:28에 체크섬으로 고정했다(`data_lists/eval_step1
 
 ## 고친 버그 (실행 전에 발견)
 
+- **판단 기준값 τ 파일 이름 (10-16, 흐름 확인에서 발견)**: `flag_threshold.py --val_only`는 τ를 `flag_threshold_val.json`에 쓰는데, 고르기와 평가는 `flag_threshold.json`을 읽는다. 그래서 Ours 후보를 고를 때 판단을 무시하고 항상 ACCEPT로 세었다(과잉 거부가 점수에 반영되지 않음). 오류 없이 지나가서, 흐름 확인의 투표 단계에서 파일이 없어 멈추고서야 드러났다. 진짜 학습 전이라 결과에 영향은 없다. τ를 두 이름으로 저장하고, 고르기는 판단 모델에 τ가 없으면 멈추게 했다.
+- **묶음 순서 (10-16)**: 원래 결정 행이 없는 장면의 plausible 행을 target 경로를 정하기 전에 빼지 않아 멈췄다(위 묶음 설명). 결과는 의도와 같다.
+
 - **metric cache 목록 덮어쓰기**: 학습 추가 장면의 cache를 기존 `navtrain_sensor` 폴더에 만들면, caching이 목록(metadata csv)을 새 장면만으로 덮어써 기존 2.3만 장면이 목록에서 빠진다(`MetricCacheLoader`는 첫 csv만 읽는다). 학습 추가 장면은 따로 만들고, 두 목록을 합친 `navtrain_step14_train`(목록만 있음)으로 읽는다. `l3_synth.py`에 `--cache`를 추가했고, 검증 세트(`val`)의 cache도 이 목록을 쓴다(`yesman/eval_sets.py`).
 - 단계별 스크립트는 맥에서 썼고 pod에서 처음 돌았다. 데이터 준비 전에 모든 단계를 기존 장면 몇 개로 돌려 보았다(`logs/step14/overnight_notes.md`).
 
