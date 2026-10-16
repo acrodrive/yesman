@@ -7,7 +7,8 @@
 # 고른 설정은 exp/step14/select/conf_*.txt, 최종 모델 목록은 exp/step14/final_models.txt (문서 이름, 코드 실행 이름 앞부분).
 #
 # 실행 이름 (코드 이름 + _s14_ + 설정): 예 B3_s14_st40k_seed0, OursDiT_s14_pl06_bs_seed0
-# 기본 구성(2단계 이전): CF⁻ 무게 0.25(13단계 값), plausible CF⁻ 비중은 묶음 그대로(옵션 끔), 나머지 장치 끔
+# 기본 구성(2단계 이전, 4.2절 step 수·크기와 4.1절 장면 수 단계에 쓴다): CF⁻ 무게 0.25(13단계 값), plausible CF⁻ 비중 0.6
+#   (2단계 후보 0.4/0.6/0.85의 가운데. 묶음 그대로면 6%라 최종 구성과 학습 모습이 너무 달라서 2026-10-16 사용자와 정함), 나머지 장치 끔
 #
 # 병렬: 학습과 예측(GPU)은 자물쇠 하나로 한 번에 하나만 돌고, 데이터 준비의 VLM 같은 다른 GPU 작업이 있으면 기다린다.
 # L1 일치 판정·채점·τ(CPU)는 자리 CPU_SLOTS개(기본 2)에서 다음 학습과 겹쳐 돈다. 서로 기다릴 필요 없는 후보(한 단계의 후보들,
@@ -20,7 +21,8 @@ source /workspace/yesman/scripts/setup/env.sh
 cd /workspace/yesman
 SEL=exp/step14/select; LOG=logs/step14/train; mkdir -p $SEL $LOG
 BUNDLE="--bundle_suffix _step14_plaus"
-BASE_CF="--neg_to_pos 0.25"
+BASE_CF="--neg_to_pos 0.25"                       # 2단계 후보를 만들 때의 바탕 (plausible 비중은 후보마다 붙인다)
+BASE4="--neg_to_pos 0.25 --plausible_share 0.6"   # 4.2절, 4.1절의 기본 구성
 VALSUF=_step14_plaus  # 검증 세트(val)로 쓸 묶음
 Q=""
 if [ "${QUICK:-0}" = 1 ]; then
@@ -107,7 +109,7 @@ upper_args () { echo "--upper_follow ${Q}Bcomply_s14_seed0 --upper_safe ${Q}B1_s
 # ---- 4.2 학습 step 수 (B3, 기본 구성, 지금 크기, 시드 0) ----
 note "4.2 step 수"
 for st in 20 40 80 120; do
-  STEPS=$((st * 1000)) job ${Q}B3_s14_st${st}k_seed0 B3 - $BASE_CF
+  STEPS=$((st * 1000)) job ${Q}B3_s14_st${st}k_seed0 B3 - $BASE4
 done
 join
 b=$(select_cfg steps --rule steps --cands ${Q}B3_s14_st20k_seed0 ${Q}B3_s14_st40k_seed0 ${Q}B3_s14_st80k_seed0 ${Q}B3_s14_st120k_seed0) || die "step 수"
@@ -117,8 +119,8 @@ note "고른 step 수 $STEPS"
 # ---- 4.2 모델 크기 (고른 step 수에서) ----
 note "4.2 모델 크기"
 STEPTAG=st$((STEPS / 1000))k
-job ${Q}B3_s14_${STEPTAG}_L6_seed0 B3 - $BASE_CF --n_layers 6
-job ${Q}B3_s14_${STEPTAG}_W384_seed0 B3 - $BASE_CF --d_model 384
+job ${Q}B3_s14_${STEPTAG}_L6_seed0 B3 - $BASE4 --n_layers 6
+job ${Q}B3_s14_${STEPTAG}_W384_seed0 B3 - $BASE4 --d_model 384
 join
 b=$(select_cfg size --rule size --base ${Q}B3_s14_${STEPTAG}_seed0 --cands ${Q}B3_s14_${STEPTAG}_L6_seed0 ${Q}B3_s14_${STEPTAG}_W384_seed0) || die "크기"
 case $b in *_L6_seed0) export SIZE_ARGS="--n_layers 6";; *_W384_seed0) export SIZE_ARGS="--d_model 384";; *) export SIZE_ARGS="";; esac
@@ -130,9 +132,9 @@ case "$SIZE_ARGS" in "--n_layers 6") BASE_B3=${Q}B3_s14_${STEPTAG}_L6_seed0;; "-
 
 # ---- 4.1 장면 수 단계 (보고만, B3 기본 구성) ----
 note "4.1 장면 수 단계 (보고만)"
-job ${Q}B3_s14_sh0_seed0 B3 - $BASE_CF --extra_shards
-job ${Q}B3_s14_sh4_seed0 B3 - $BASE_CF --extra_shards 2 10 18 26
-job ${Q}B3_s14_sh8_seed0 B3 - $BASE_CF --extra_shards 2 10 18 26 6 14 22 30
+job ${Q}B3_s14_sh0_seed0 B3 - $BASE4 --extra_shards
+job ${Q}B3_s14_sh4_seed0 B3 - $BASE4 --extra_shards 2 10 18 26
+job ${Q}B3_s14_sh8_seed0 B3 - $BASE4 --extra_shards 2 10 18 26 6 14 22 30
 # 상한선 모델 (B0 = 코드 B1, B2 = 코드 Bcomply). 장면 수 단계와 같이 띄운다
 note "상한선 모델"
 job ${Q}B1_s14_seed0 B1 -
