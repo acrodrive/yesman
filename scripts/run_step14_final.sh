@@ -50,8 +50,10 @@ eval_cpu () {  # eval_cpu <실행 이름> <접미사>  L1 판정(모든 세트) 
     [ -f $d/${s}${suffix}_l1.parquet ] || python scripts/follow_eval.py --run $r --sets ${s}${suffix} >> $OUT/$r.log 2>&1 \
       || { note "L1 판정 실패 $r $s"; return 1; }
     [[ " $SCORE_SETS " == *" $s "* ]] || continue
+    # T3는 실행 불가능한 결정의 안전율에만 채점을 쓰므로 그 행만 채점한다(나머지는 빈 값, 행 순서와 개수는 그대로)
     [ -f $d/${s}${suffix}_scores.parquet ] || python scripts/score_rows.py --table $d/${s}${suffix}.parquet \
-      --out $d/${s}${suffix}_scores.parquet >> $OUT/$r.log 2>&1 || { note "채점 실패 $r $s"; return 1; }
+      --out $d/${s}${suffix}_scores.parquet $([[ $s == T3_* ]] && echo --only_status infeasible) >> $OUT/$r.log 2>&1 \
+      || { note "채점 실패 $r $s"; return 1; }
   done
   note "평가 끝 $r$suffix"
 }
