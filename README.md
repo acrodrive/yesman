@@ -2,25 +2,40 @@
 
 VLM이 틀린 주행 결정을 내릴 때, 그 결정을 받는 planner는 어떻게 행동하는가를 NAVSIM에서 같은 조건으로 측정한 연구이다. 보고서: [docs/report.md](docs/report.md), 연구 계획서: [yesman.md](yesman.md).
 
-![Figure 1](docs/figs/step13/fig1_follow_reject.png)
+![Figure 1](docs/figs/step14/fig1_follow_safety.png)
 
-*결정–경로 일치율–거부율 평면(불가능 기준별). 가로축: 실행할 수 있는 결정을 결정대로 따른 비율. 세로축: 실행할 수 없는 결정을 그대로 실행하지 않은 비율. 오른쪽 위가 바람직하다.*
+*새 테스트 세트에서 결정–경로 일치율(가로)과 불가능한 결정의 안전율(세로). 왼쪽: 규칙으로 만든 실행 불가능한 결정, 오른쪽: 실제 VLM(Gemma 4 31B)이 낸 실행 불가능한 결정. 오른쪽 위가 바람직하다.*
 
-## 주요 결과 (navtest, 시드 2개 평균)
+## 주요 결과 (새 테스트 세트, 사전 등록, 시드 2개 평균)
 
-| 모델 | 실행 가능한 결정–경로 일치율 (D1) | 불가능한 결정의 안전율 (D2, 규칙 기반 CF⁻) | 같은 지표, 실제 VLM 결정 (Gemma 4 12B / 31B / Qwen3-VL 8B) | 주행 점수 (D0 EPDMS) |
+navtest는 13단계까지 결과를 보며 설계를 바꾼 개발 세트이다. 주 결과는 받지 않았던 navtrain 카메라 조각으로 만든 새 테스트 세트에서, 고르는 규칙과 성공 기준을 미리 정하고 한 번만 평가한 값이다.
+
+| 모델 | 결정–경로 일치율 (T1) | 불가능한 결정의 안전율: 규칙 기반 CF⁻ (T2) | 같은 지표: 실제 Gemma 4 31B 결정 (T3, n = 397) | 주행 점수 (T0) |
 | --- | --- | --- | --- | --- |
-| B1 (결정을 보지 않음) | 4.5% | 85.7% | 80 / 76 / 78% | 0.845 |
-| B2 (결정 조건, 사람 결정만 학습) | 35.4% | 22.1% | 12 / 13 / 14% | 0.879 |
-| B-순응 (+ CF⁺) | **69.5%** | 24.0% | 17 / 14 / 21% | 0.862 |
-| B3 (+ CF⁻) | 65.7% | 76.9% | 34 / 30 / 42% | 0.862 |
-| Ours (B3 + 판단 head) | 63.2% | **77.2%** | 37 / 36 / 43% | 0.862 |
+| B0 (결정을 보지 않음) | 3.1% | 96.9% | 97.5% | 0.938 |
+| B1 (결정 입력, 사람 결정만 학습) | 34.6% | 16.2% | 25.4% | 0.946 |
+| B2 (+ CF⁺) | **80.5%** | 32.3% | 28.5% | 0.939 |
+| B3 (+ CF⁻) | 76.5% | 91.8% | 70.9% | 0.939 |
+| 이전 Ours (B3 + DiT와 병렬인 판단 head) | 74.1% | 93.3% | 73.4% | 0.941 |
+| **Ours** (B3 + DiT 내부 표현에서 판단) | 73.3% | 93.0% | 72.7% | 0.937 |
 
-1. 결정을 더 잘 따르게 학습해도 실행할 수 없는 결정을 더 따르지는 않았고(사전 가설 기각), 안전해지지도 않았다(B2 22% → B-순응 24%).
-2. 안전은 실행할 수 없는 결정의 예를 학습에 넣을 때 생기며(약 3배), 판단 head와는 무관하다(B3 ≈ Ours). head는 거부 표시와 근거를 더한다.
-3. 규칙 기반 CF⁻에서 잰 효과는 실제 VLM의 틀린 결정에서 절반 이하로 줄어든다. 실제 VLM의 오답은 그럴싸하지만 움직임 때문에 틀리는 결정(앞차가 감속하는데 속도 유지)이 많다.
-4. VLM을 쓰지 않고 만든 plausible CF⁻(비슷해 보이는 장면이나 조금 전의 사람 결정)으로 학습하면, 학습에 쓰지 않은 VLM 3개 중 2개에서 불가능한 결정의 안전율이 12~13%p 오른다(사후 분석).
-5. 경로와 따로 된 판단 head는 그럴싸한 오답에서 DiT의 행동과 어긋난 판단을 낸다. 판단을 DiT가 경로를 내기 직전의 표현에서 읽으면 더 잘 가른다(Gemma 4 31B 오답 AUC 0.67 → 0.80, 사후 분석).
+1. 실행할 수 없는 결정의 예(CF⁻)로 학습하면 처음 보는 VLM의 틀린 결정에서도 크게 안전해진다(Ours − B2 = +44.2%p [+39.4, +48.7]).
+2. 학습 장면을 3배로 늘리고 CF를 개량하자, 같은 navtest에서 Gemma 4 31B 오답의 안전율이 30~36%에서 55%로 올랐고 결정을 따르는 능력도 함께 올랐다.
+3. Ours는 B3보다 안전에서 낮지 않고(+1.8%p, 성공) 판단과 경로의 불일치를 이전 Ours보다 줄이지만(−1.1%p, 성공), 실행 가능한 결정을 B3보다 덜 따른다(−3.2%p, 허용 폭 −2%p를 넘어 실패).
+4. 판단은 규칙 기반 오답의 90%를 거르지만 실제 VLM 오답은 37%만 거른다. 실제 VLM 오답의 절반 이상이 거리와 속도를 판단해야 하는 강도 기준이다.
+
+13단계까지의 결과(순응 학습과 맹목적 추종, 규칙 기반 CF⁻와 실제 VLM 오답의 차이, plausible CF⁻, probe)는 보고서 5절에 있다.
+
+### 모델 이름
+
+| 이 문서와 보고서 | 13단계까지의 이름 | 14단계 코드 실행 이름 | 13단계 코드 실행 이름 |
+| --- | --- | --- | --- |
+| B0 | B1 | `B1_s14` | `B1` |
+| B1 | B2 | `B2_s14` | `B2` |
+| B2 | B-순응 | `Bcomply_s14` | `Bcomply_syn` |
+| B3 | B3 | `B3_s14_pl04_bs_r05` | `B3_syn` |
+| 이전 Ours | Ours | `Ours_s14_pl04_r1` | `Ours_syn` |
+| Ours | (없음) | `OursDiT_s14_pl04_r1_jl2` | – |
 
 ## 저장소 구성
 
@@ -28,8 +43,10 @@ VLM이 틀린 주행 결정을 내릴 때, 그 결정을 받는 planner는 어�
 | --- | --- |
 | `yesman/` | 패키지: 결정 형식(`decision.py`), L1 라벨러(`l1.py`), L2 실행 가능 판정(`l2.py`), L3 counterfactual(`l3.py`), target 경로 합성(`synth.py`), planner(`model.py`), 학습 데이터(`train_data.py`), 채점(`scoring.py`) |
 | `scripts/` | 단계별 실행 스크립트 (아래) |
-| `data_lists/eval/` | 고정한 평가 세트 D0~D3, D3x(VLM 3개), `SHA256SUMS` |
-| `docs/stepNN_*.md` | 단계별 결과와 계획서와 달라진 점 |
+| `data_lists/eval_step14/` | 새 테스트 세트 T0~T3 (14단계, 고정, `SHA256SUMS`) |
+| `data_lists/eval/` | navtest 평가 세트 D0~D3, D3x(VLM 3개), `SHA256SUMS` (14단계부터 개발 세트) |
+| `data_lists/step14/` | 14단계 조각 나누기와 장면 목록 |
+| `docs/stepNN_*.md` | 단계별 결과와 계획서와 달라진 점. 14단계는 `step14_preregistration.md`(사전 등록)와 `step14_run.md`(실행 기록) |
 | `docs/report.md` | 보고서 |
 | `tests/` | L1, 모델 단위 테스트 |
 
@@ -37,7 +54,7 @@ VLM이 틀린 주행 결정을 내릴 때, 그 결정을 받는 planner는 어�
 
 ## 재현
 
-평가 세트가 저장소에 있으므로, 평가 세트를 다시 만들지 않고 학습과 평가만 재현할 수도 있다(5단계 이후). 확인: `sha256sum -c data_lists/eval/SHA256SUMS`.
+평가 세트가 저장소에 있으므로, 평가 세트를 다시 만들지 않고 학습과 평가만 재현할 수도 있다. 확인: `(cd data_lists/eval_step14 && sha256sum -c SHA256SUMS)`, `sha256sum -c data_lists/eval/SHA256SUMS`. 아래 0~4는 13단계까지, 5는 14단계(주 결과)이다.
 
 ### 0. 환경과 데이터 (1~3단계)
 
@@ -80,7 +97,7 @@ python scripts/d3_judge.py --name d3
 # D3 확장(VLM 3개 x 3,000장면): scripts/run_step12_vlm.sh, run_step12_vlm31.sh, run_step12_d3x.sh
 ```
 
-### 3. 학습 (8~12단계, GPU, 모델 하나에 약 5분)
+### 3. 학습 (8~12단계, GPU, 모델 하나에 약 5분. 13단계 이름)
 
 ```bash
 for s in 0 1; do
@@ -106,6 +123,19 @@ python scripts/analyze_step11.py --final && python scripts/viz_step11.py --final
 python scripts/analyze_step12.py --final && python scripts/analyze_step12_d3safety.py --synth   # 실제 VLM 결정
 ```
 
+### 5. 14단계: 새 테스트 세트, 데이터 확장, 새 Ours (GPU, 데이터 준비 약 1.5일, 학습 약 18시간, 테스트 평가 약 7시간)
+
+```bash
+bash scripts/run_step14_pipeline.sh      # 남은 24조각, 조각 나누기, metric cache, LTF 특징, T0~T3(Gemma 4 31B)와 고정,
+                                         # 학습 CF 판정(메뉴 전부, 확장, plausible), 학습 묶음, 그럴싸함 점수
+bash scripts/run_step14_train.sh         # step 수·크기, 장면 수 단계, 상한선, B3·Ours의 CF 구성, 이전 Ours, Ours 설정, 시드 1
+CONFIRM=1 bash scripts/run_step14_final.sh   # 새 테스트 세트에서 한 번 평가 → logs/step14/final/eval.md
+bash scripts/run_step14_navtest.sh && python scripts/step14_navtest_compare.py   # navtest(개발 세트) 비교
+python scripts/viz_step14.py             # 보고서 Figure 1, 2
+```
+
+컨테이너의 메모리(60 GB)와 CPU(13.6코어) 한도, 볼륨 공간 때문에 바꾼 점은 `docs/step14_run.md`에 있다.
+
 ## 단계별 기록
 
 | 단계 | 문서 |
@@ -119,7 +149,9 @@ python scripts/analyze_step12.py --final && python scripts/analyze_step12_d3safe
 | 9. 비교 모델 | [step09](docs/step09_baselines.md) |
 | 10. 제안 방법, flag–경로 불일치 원인 시험 | [step10](docs/step10_ours.md), [step10b](docs/step10b_decoder.md) |
 | 11. 평가와 분석 | [step11](docs/step11_eval.md) |
-| 12. 추가 실험(B3, VLM 3개, 목표 합성, 넓힌 CF, 물체 정보, plausible CF⁻, probe) | [step12](docs/step12_extra.md) |
+| 12. 추가 실험(B3, VLM 3개, 목표 합성, 확장된 규칙 기반 CF, 물체 정보, plausible CF⁻, probe) | [step12](docs/step12_extra.md) |
+| 13. 보고서와 공개 | [step13](docs/step13_release.md) |
+| 14. 새 테스트 세트, 데이터 확장, 새 Ours (사전 등록) | [사전 등록](docs/step14_preregistration.md), [실행 기록](docs/step14_run.md) |
 
 ## 라이선스와 출처
 
