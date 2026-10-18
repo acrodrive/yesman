@@ -20,7 +20,7 @@ navtest는 13단계까지 결과를 보며 설계를 바꾼 개발 세트이다.
 | **Ours** (B3 + DiT 내부 표현에서 판단) | 73.3% | 93.0% | 72.7% | 0.937 |
 
 1. 실행할 수 없는 결정의 예(CF⁻)로 학습하면 처음 보는 VLM의 틀린 결정에서도 크게 안전해진다(Ours − B2 = +44.2%p [+39.4, +48.7]).
-2. 학습 장면을 3배로 늘리고 CF를 개량하자, 같은 navtest에서 Gemma 4 31B 오답의 안전율이 30~36%에서 55%로 올랐고 결정을 따르는 능력도 함께 올랐다.
+2. 학습 장면을 3배로 늘리고 CF를 개량하자, 같은 navtest에서 Gemma 4 31B 오답의 안전율이 30~36%에서 55%로 올랐고 결정을 따르는 능력도 함께 올랐다. 기여 분석(탐색)에서 주된 원인은 장면 수나 CF⁻ 개수가 아니라 CF⁻가 덮는 결정 변화의 종류였다. 확장·plausible CF가 13단계 CF⁻에 거의 없던 앞뒤 행동·강도·여러 가지를 함께 바꾼 CF⁻를 채웠다(보고서 4.2절).
 3. Ours는 B3보다 안전에서 낮지 않고(+1.8%p, 성공) 판단과 경로의 불일치를 이전 Ours보다 줄이지만(−1.1%p, 성공), 실행 가능한 결정을 B3보다 덜 따른다(−3.2%p, 허용 폭 −2%p를 넘어 실패).
 4. 판단은 규칙 기반 오답의 90%를 거르지만 실제 VLM 오답은 37%만 거른다. 실제 VLM 오답의 절반 이상이 거리와 속도를 판단해야 하는 강도 기준이다.
 
@@ -131,6 +131,7 @@ bash scripts/run_step14_pipeline.sh      # 남은 24조각, 조각 나누기, me
 bash scripts/run_step14_train.sh         # step 수·크기, 장면 수 단계, 상한선, B3·Ours의 CF 구성, 이전 Ours, Ours 설정, 시드 1
 CONFIRM=1 bash scripts/run_step14_final.sh   # 새 테스트 세트에서 한 번 평가 → logs/step14/final/eval.md
 bash scripts/run_step14_navtest.sh && python scripts/step14_navtest_compare.py   # navtest(개발 세트) 비교
+bash scripts/run_step14_contrib.sh && python scripts/step14_contrib.py           # (탐색) 기여 분석, 고르기 후보 평가는 보고서 부록 B
 python scripts/viz_step14.py             # 보고서 Figure 1, 2
 ```
 

@@ -6,12 +6,14 @@
 # 예측(GPU)은 하나씩, L1 판정·채점(CPU)은 자리 CPU_SLOTS개(기본 2)에서 겹쳐 돈다. 끝난 파일은 건너뛴다.
 #
 # 사용법: nohup setsid bash scripts/run_step14_navtest.sh > logs/step14/navtest.log 2>&1 &
+# 다른 목록: LIST(줄마다 "이름 실행", 같은 실행은 한 번만), SETS, SEEDS, OUT 환경 변수로 바꾼다. SETS에 D0가 없으면 D0 공식 채점을 건너뛴다.
 set -uo pipefail
 source /workspace/yesman/scripts/setup/env.sh
 cd /workspace/yesman
-OUT=logs/step14/navtest; mkdir -p $OUT/locks
-LIST=exp/step14/select/final_models.txt
-SETS="D0 D1 D2 D3x_gemma31b D3x_gemma12b D3x_qwen8b"
+OUT=${OUT:-logs/step14/navtest}; mkdir -p $OUT/locks
+LIST=${LIST:-exp/step14/select/final_models.txt}
+SETS=${SETS:-"D0 D1 D2 D3x_gemma31b D3x_gemma12b D3x_qwen8b"}
+SEEDS=${SEEDS:-"0 1"}
 CPU_SLOTS=${CPU_SLOTS:-2}
 note () { echo "=== $(date '+%m-%d %H:%M') $*"; }
 cpu_run () {
@@ -35,13 +37,14 @@ eval_cpu () {
     [ -f $d/D3x_${v}_scores.parquet ] || python scripts/score_rows.py --table $d/D3x_${v}.parquet --out $d/D3x_${v}_scores.parquet \
       --only_status infeasible >> $OUT/$r.log 2>&1 || { note "채점 실패 $r D3x_$v"; return 1; }
   done
+  case " $SETS " in *" D0 "*) ;; *) note "평가 끝 $r"; return 0 ;; esac
   [ -f $d/D0_score.json ] || python scripts/score_planner.py --run $r --threads 14 > $OUT/$r.score_planner.log 2>&1 \
     || { note "D0 채점 실패 $r"; return 1; }
   note "평가 끝 $r"
 }
 PIDS=""
-for r in $(awk '$1 != "vote" {print $2}' $LIST); do
-  for seed in 0 1; do
+for r in $(awk '$1 != "vote" && !seen[$2]++ {print $2}' $LIST); do
+  for seed in $SEEDS; do
     run=${r}_seed$seed; d=exp/eval/$run; need=""
     for s in $SETS; do [ -f $d/$s.parquet ] || need="$need $s"; done
     if [ -n "$need" ]; then

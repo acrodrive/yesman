@@ -149,6 +149,13 @@ def main():
     ap.add_argument("--freeze_dit", action="store_true",
                     help="OursDiT: --init_from 모델의 DiT를 불러와 고정하고 판단 head만 학습한다 (경로 손실 없음)")
     ap.add_argument("--init_from", default="", help="--freeze_dit에서 DiT 가중치를 불러올 실행 이름 (예: B3_seed0)")
+    ap.add_argument("--drop_source", nargs="*", default=[],
+                    help="학습 묶음에서 이 출처(source: menu / wide / plausible)의 CF를 뺀다 (14단계 기여 분석)")
+    ap.add_argument("--drop_neg_only", action="store_true", help="--drop_source를 CF⁻에만 적용한다 (CF⁺는 남긴다)")
+    ap.add_argument("--neg_keep_frac", type=float, default=1.0,
+                    help="학습 CF⁻를 이 비율만 무작위로 남긴다 (14단계 기여 분석: 0.26이면 장면당 CF⁻ 수가 13단계 수준)")
+    ap.add_argument("--pos_keep_frac", type=float, default=1.0,
+                    help="학습 CF⁺를 이 비율만 무작위로 남긴다 (14단계 기여 분석: 0.2355면 batch 구성이 13단계 묶음과 같다)")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -173,6 +180,22 @@ def main():
         train = train.subset((train.df.visibility != "unseen").to_numpy())
         if val is not train:
             val = val.subset((val.df.visibility != "unseen").to_numpy())
+    if args.drop_source and "source" in train.df:  # 14단계 기여 분석
+        drop = train.df.source.isin(args.drop_source).to_numpy()
+        if args.drop_neg_only:
+            drop &= (train.df.sample_type == "cf_neg").to_numpy()
+        train = train.subset(~drop)
+        print(f"  drop_source {args.drop_source}: {drop.sum():,}행 뺌", flush=True)
+    if args.neg_keep_frac < 1:  # 14단계 기여 분석: CF⁻ 수만 줄이고 종류 구성은 그대로
+        neg = (train.df.sample_type == "cf_neg").to_numpy()
+        keep = ~neg | (np.random.default_rng(args.seed).random(len(train)) < args.neg_keep_frac)
+        train = train.subset(keep)
+        print(f"  neg_keep_frac {args.neg_keep_frac}: CF⁻ {neg.sum():,} → {(neg & keep).sum():,}", flush=True)
+    if args.pos_keep_frac < 1:  # 14단계 기여 분석: CF⁺ 수(와 batch 안 원래 결정 비중)만 13단계 수준으로
+        pos = (train.df.sample_type == "cf_pos").to_numpy()
+        keep = ~pos | (np.random.default_rng(args.seed + 1).random(len(train)) < args.pos_keep_frac)
+        train = train.subset(keep)
+        print(f"  pos_keep_frac {args.pos_keep_frac}: CF⁺ {pos.sum():,} → {(pos & keep).sum():,}", flush=True)
     # 샘플 무게: 원래 결정과 CF⁺는 1씩(B-순응과 같은 비율), CF⁻는 전체 무게가 CF⁺의 neg_to_pos배가 되게 한다
     st = train.df.sample_type.to_numpy()
     w = np.ones(len(train))

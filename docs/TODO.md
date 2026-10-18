@@ -26,14 +26,14 @@
 - 검증 세트의 CF⁻는 95%가 규칙 기반이라 실제 VLM 오답에서의 효과를 잘 보여 주지 못한다 → 실제 VLM 오답이 있는 navtest D3x에서 다시 본다
 
 할 일
-1. [ ] **이미 학습된 고르기 후보 모델을 navtest에서 평가** (학습 불필요, 시드 0): `scripts/run_step14_navtest.sh`를 후보 목록으로 돌린다(세트 D1, D2, D3x_gemma31b, D3x_gemma12b, D3x_qwen8b. D0 공식 채점은 생략 가능). `exp/step14/select/`와 `docs/step14_run.md` 4.1~4.3절에서 실행 이름을 찾는다
+1. [x] (2026-10-18 끝, 표 `exp/step14/contrib/table.md`, 같은 장면의 묶음 비교 `exp/step14/contrib/bundle_old_scenes.md`) **이미 학습된 고르기 후보 모델을 navtest에서 평가** (학습 불필요, 시드 0): `scripts/run_step14_navtest.sh`를 후보 목록으로 돌린다(세트 D1, D2, D3x_gemma31b, D3x_gemma12b, D3x_qwen8b. D0 공식 채점은 생략 가능). `exp/step14/select/`와 `docs/step14_run.md` 4.1~4.3절에서 실행 이름을 찾는다
    - CF⁻ 무게 0.25 / 0.5 / 1 (B3, Ours)
    - plausible 비중 0.4 / 0.6 / 0.85 (B3, Ours)
    - 장면 수 단계: `B3_s14_sh0/sh4/sh8_seed0`와 전부(16조각)
    - step 수: `B3_s14_st20k/st40k/st80k/st120k_seed0`
    - 표: 요소마다 D1 결정–경로 일치율, D2 안전율(이유별), D3x 세 VLM의 불가능한 결정의 안전율
-2. [ ] 1의 결과를 보고, 새로 학습해야 알 수 있는 것 중 무엇을 할지 사용자와 정한다(하나에 약 30분): 장면당 CF 4개만 / 확장 CF 빼기 / plausible 비중 0(학습 옵션 추가 필요) / 13단계 설정(2만 step, 무게 0.25)을 14단계 데이터에
-3. [ ] 결과를 `docs/step14_run.md`(또는 새 문서)와 보고서에 탐색 분석으로 정리
+2. [x] (2026-10-18 끝, `exp/step14/contrib/findings.md`) 1의 결과를 보고, 새로 학습해야 알 수 있는 것 중 무엇을 할지 사용자와 정한다(하나에 약 30분): 장면당 CF 4개만 / 확장 CF 빼기 / plausible 비중 0(학습 옵션 추가 필요) / 13단계 설정(2만 step, 무게 0.25)을 14단계 데이터에
+3. [x] (2026-10-18, `docs/step14_run.md` "(탐색) navtest 기여 분석", 보고서 4.2절) 결과를 `docs/step14_run.md`(또는 새 문서)와 보고서에 탐색 분석으로 정리
 
 주의
 - 볼륨에 있는 것만 쓴다: `exp/train/` 체크포인트, `exp/features/ltf/navtest`, `exp/metric_cache/navtest`, `data_lists/eval/`. pod를 껐으므로 컨테이너 디스크의 학습 추가 장면 metric cache(`exp/metric_cache/navtrain_step14_extra`의 링크 대상)와 VLM 환경은 없다. 검증 세트를 채점하거나 새 CF를 판정해야 하면 `run_step14_data.sh cache_train`(약 3시간)으로 다시 만든다
