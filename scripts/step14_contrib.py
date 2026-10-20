@@ -86,10 +86,13 @@ PAIRS = [("B3_syn_seed0", "B3_s14_sh0_seed0"), ("B3_syn_seed0", "B3_s14_st20k_se
          ("B3_s14_st80k_seed0", "B3_s14_menuonly_seed0"), ("B3_s14_st80k_seed0", "B3_s14_pos024_seed0"),
          ("B3_syn_seed0", "B3_s14_menuonly_seed0"), ("B3_syn_seed0", "B3_s14_pos024_seed0"),
          ("B3_s14_st80k_seed0", "B3_s14_menuneg_seed0"), ("B3_s14_menuonly_seed0", "B3_s14_menuneg_seed0"),
-         ("B3_syn_seed0", "B3_s14_menuneg_seed0")]
+         ("B3_syn_seed0", "B3_s14_menuneg_seed0"),
+         # 사후 분석 4번 (2026-10-20): 메뉴만 쓰되 좌우만 바꾸지 않은 CF⁻의 무게 비중을 기준과 같게(0.705)
+         ("B3_s14_menuonly_seed0", "B3_s14_menunl70_seed0"), ("B3_s14_st80k_seed0", "B3_s14_menunl70_seed0"),
+         ("B3_s14_menuneg_seed0", "B3_s14_menunl70_seed0")]
 BY_CAT = ["B3_syn_seed0", "B3_s14_sh0_seed0", "B3_s14_st80k_seed0", "B3_s14_nowide_seed0", "B3_s14_neg026_seed0",
           "B3_s14_noplaus_seed0", "B3_s14_menuonly_seed0", "B3_s14_menuneg_seed0", "B3_s14_pos024_seed0",
-          "B3_s14_pl04_bs_r05_seed0", "OursDiT_s14_pl04_r1_jl2_seed0"]
+          "B3_s14_pl04_bs_r05_seed0", "OursDiT_s14_pl04_r1_jl2_seed0", "B3_s14_menunl70_seed0"]
 
 
 def pair_text():
@@ -126,7 +129,8 @@ def main():
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
     rows = [{"요소": "13단계", "값": "B3_syn", "실행": "B3_syn_seed0", **metrics("B3_syn_seed0", step13=True)}]
-    lists = [ROOT / "exp/step14/contrib/runs.txt", ROOT / "exp/step14/contrib/runs2.txt"]  # runs2 = 2번 (새로 학습)
+    lists = [ROOT / "exp/step14/contrib/runs.txt", ROOT / "exp/step14/contrib/runs2.txt",  # runs2 = 2번 (새로 학습)
+             ROOT / "exp/step14/contrib/runs3.txt"]  # runs3 = 사후 분석 4번
     for line in [l for f in lists if f.exists() for l in f.read_text().splitlines()]:
         if not line.strip():
             continue

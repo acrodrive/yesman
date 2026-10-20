@@ -93,6 +93,12 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | B3 | B3_s14_menuneg_seed0 | 0.697 | 0.000 | 0.824 | 0.836 | 0.841 | 0.671 | 0.330 | 0.472 | 0.495 |
 
+### menunl70
+
+| 값 | 실행 | follow_D1 | reject_D1 | safe_D2 | safe_D2_road | safe_D2_agent | safe_D2_strength | safe_gemma31b | safe_gemma12b | safe_qwen8b |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| B3 | B3_s14_menunl70_seed0 | 0.710 | 0.000 | 0.810 | 0.817 | 0.795 | 0.789 | 0.394 | 0.441 | 0.582 |
+
 D3x 실행 불가능한 결정 수: {'gemma31b': 94, 'gemma12b': 127, 'qwen8b': 194}
 
 ### 짝 비교 (D3x 세 VLM 합침, 차이 = 오른쪽 - 왼쪽, 짝 부트스트랩 95% 구간)
@@ -120,6 +126,9 @@ D3x 실행 불가능한 결정 수: {'gemma31b': 94, 'gemma12b': 127, 'qwen8b': 
 | B3_s14_st80k_seed0 | B3_s14_menuneg_seed0 | 0.595 | 0.451 | -0.145 | [-0.188, -0.101] |
 | B3_s14_menuonly_seed0 | B3_s14_menuneg_seed0 | 0.424 | 0.451 | +0.027 | [-0.012, +0.067] |
 | B3_syn_seed0 | B3_s14_menuneg_seed0 | 0.381 | 0.451 | +0.070 | [+0.027, +0.116] |
+| B3_s14_menuonly_seed0 | B3_s14_menunl70_seed0 | 0.424 | 0.496 | +0.072 | [+0.034, +0.113] |
+| B3_s14_st80k_seed0 | B3_s14_menunl70_seed0 | 0.595 | 0.496 | -0.099 | [-0.145, -0.053] |
+| B3_s14_menuneg_seed0 | B3_s14_menunl70_seed0 | 0.451 | 0.496 | +0.046 | [+0.005, +0.087] |
 
 ### D3x 이유별 안전율 (세 VLM 합침)
 
@@ -136,6 +145,7 @@ D3x 실행 불가능한 결정 수: {'gemma31b': 94, 'gemma12b': 127, 'qwen8b': 
 | B3_s14_pos024_seed0 | 0.646 | 0.625 | 0.437 |
 | B3_s14_pl04_bs_r05_seed0 | 0.696 | 0.694 | 0.466 |
 | OursDiT_s14_pl04_r1_jl2_seed0 | 0.704 | 0.639 | 0.485 |
+| B3_s14_menunl70_seed0 | 0.654 | 0.389 | 0.204 |
 
 이유별 결정 수: {'road': 240, 'agent': 72, 'strength': 103}
 
@@ -154,6 +164,7 @@ D3x 실행 불가능한 결정 수: {'gemma31b': 94, 'gemma12b': 127, 'qwen8b': 
 | B3_s14_pos024_seed0 | 0.670 | 0.487 | 0.406 | 0.710 | 0.421 | 0.667 |
 | B3_s14_pl04_bs_r05_seed0 | 0.745 | 0.470 | 0.469 | 0.774 | 0.632 | 0.611 |
 | OursDiT_s14_pl04_r1_jl2_seed0 | 0.700 | 0.557 | 0.469 | 0.742 | 0.632 | 0.611 |
+| B3_s14_menunl70_seed0 | 0.690 | 0.357 | 0.250 | 0.290 | 0.211 | 0.333 |
 
 바뀐 종류별 결정 수: {'lat_type+strength': 200, 'strength': 115, 'lon_type+strength': 32, 'lon_type': 31, 'lat_type+lon_type': 19, 'lat_type+lon_type+strength': 18}
 

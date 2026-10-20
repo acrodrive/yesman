@@ -131,6 +131,9 @@ def main():
                     help="CF⁻ 안에서 강도 기준 CF⁻의 전체 무게를 도로 기준과 같게 한다 (CF⁻ 전체 무게는 그대로, 12단계 B)")
     ap.add_argument("--plausible_share", type=float, default=0.0,
                     help="CF⁻ 안에서 plausible CF⁻(source = plausible)의 무게 비중 (CF⁻ 전체 무게는 그대로, 12단계 C)")
+    ap.add_argument("--nonlat_share", type=float, default=0.0,
+                    help="CF⁻ 안에서 좌우 행동만 바꾸지 않은 CF⁻(change_type이 lat_type 하나가 아닌 것)의 무게 비중 "
+                         "(CF⁻ 전체 무게는 그대로, 14단계 사후 분석 4번: 종류 때문인가 비율 때문인가)")
     ap.add_argument("--keep_unseen", action="store_true", help="보이지 않는 원인 CF⁻도 학습에 쓴다 (기본: 뺀다, 10단계 결정)")
     ap.add_argument("--balance_by_type", action="store_true",
                     help="결정 종류(구간별 앞뒤·좌우 행동, 강도 무시)마다 CF⁻ 무게 / CF⁺ 무게를 전체 비율과 같게 한다. 결정 종류만 "
@@ -215,6 +218,14 @@ def main():
             w[pl] *= args.plausible_share / (1 - args.plausible_share) * w[neg & ~pl].sum() / w[pl].sum()
             w[neg] *= args.neg_to_pos * (st == "cf_pos").sum() / w[neg].sum()
             print(f"  plausible_share: 그럴싸한 CF⁻ {pl.sum():,}개, 무게 {w[pl].sum() / w[neg].sum():.2f} (CF⁻ 안)", flush=True)
+        if args.nonlat_share:
+            neg = st == "cf_neg"
+            kind = train.df.change_type.fillna("").str.split("/").str[0].to_numpy()
+            nl = neg & (kind != "lat_type")
+            w[nl] *= args.nonlat_share / (1 - args.nonlat_share) * w[neg & ~nl].sum() / w[nl].sum()
+            w[neg] *= args.neg_to_pos * (st == "cf_pos").sum() / w[neg].sum()
+            print(f"  nonlat_share: 좌우만 바꾸지 않은 CF⁻ {nl.sum():,}개, 무게 {w[nl].sum() / w[neg].sum():.3f} (CF⁻ 안)",
+                  flush=True)
         if args.plaus_weight:
             neg = st == "cf_neg"
             score = np.maximum(train.df[f"plaus_{args.plaus_weight}"].fillna(0).to_numpy(), args.plaus_min)
