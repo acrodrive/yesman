@@ -10,6 +10,9 @@
 - 바꾼 종류: change_type의 앞부분(사람 결정에서 무엇을 바꿨나)
 - 불가능 이유: category (T2, T3 실행 불가능)
 - 메뉴 결정: cf_name (T1, T2)
+- 그럴싸함: 강도까지 같은 그럴싸함 점수(cf_plausibility.py, 사전 등록 6절)의 구간 0 / 0~0.1 / 0.1 이상과,
+  바꾼 종류 x 그럴싸함 (T2, T3). exp/step14/posthoc/<파일>_plaus.parquet가 있을 때만
+  (scripts/run_step14_posthoc_plaus.sh)
 
 사용법: python scripts/step14_type_cells.py [--no_models]   # → docs/step14_type_cells.json
 """
@@ -24,17 +27,21 @@ import pandas as pd
 
 ROOT = Path(os.environ["YESMAN_ROOT"])
 D = ROOT / "data_lists/eval_step14"
+PLAUS = Path(os.environ.get("NAVSIM_EXP_ROOT", "")) / "step14/posthoc"
 OUT = ROOT / "docs/step14_type_cells.json"
 
 SETS = [  # (id, 파일, 이름, 실행 가능 여부, 행 고르기, 유형 축)
     ("T1", "T1", "T1: 규칙 기반 CF⁺ (실행 가능)", True, None, ["kind", "cf_name"]),
     ("T2", "T2", "T2: 규칙 기반 CF⁻ (실행 불가능, 보이지 않는 원인 제외)", False, ("visibility", lambda c: c != "unseen"),
-     ["kind", "category", "cf_name"]),
+     ["kind", "category", "cf_name", "plaus", "kind_plaus"]),
     ("T3_inf", "T3_gemma31b", "T3: Gemma 4 31B의 실행 불가능한 결정", False, ("status", lambda c: c == "infeasible"),
-     ["kind", "category"]),
-    ("T3_fea", "T3_gemma31b", "T3: Gemma 4 31B의 실행 가능한 결정", True, ("status", lambda c: c == "feasible"), ["kind"]),
+     ["kind", "category", "plaus", "kind_plaus"]),
+    ("T3_fea", "T3_gemma31b", "T3: Gemma 4 31B의 실행 가능한 결정", True, ("status", lambda c: c == "feasible"),
+     ["kind", "plaus", "kind_plaus"]),
 ]
-AXES = {"kind": "바꾼 종류", "category": "불가능 이유", "cf_name": "메뉴 결정"}
+AXES = {"kind": "바꾼 종류", "category": "불가능 이유", "cf_name": "메뉴 결정", "plaus": "그럴싸함",
+        "kind_plaus": "바꾼 종류 x 그럴싸함"}
+PLAUS_BINS = {"p0": "그럴싸함 0", "p1": "그럴싸함 0~0.1", "p2": "그럴싸함 0.1 이상"}
 KIND = {"lat_type": "좌우", "lon_type": "앞뒤", "strength": "강도", "none": "사람과 같음"}
 LABELS = {
     "category": {"road": "도로", "agent": "다른 차", "strength": "강도"},
@@ -53,14 +60,37 @@ def kind(change_type):
 def label(axis, v):
     if axis == "kind":
         return " + ".join(KIND.get(p, p) for p in v.split("+"))
+    if axis == "plaus":
+        return PLAUS_BINS[v]
+    if axis == "kind_plaus":
+        k, b = v.split("|")
+        return f"{label('kind', k)} · {PLAUS_BINS[b]}"
     return LABELS.get(axis, {}).get(v, v)
 
 
 def table(file, pick):
     t = pd.read_parquet(D / f"{file}.parquet")
     t["kind"] = kind(t.change_type)
+    pl = PLAUS / f"{file}_plaus.parquet"
+    if pl.exists():
+        s = pd.read_parquet(pl, columns=["token", "plaus_strength"])
+        assert (s.token.to_numpy() == t.token.to_numpy()).all(), pl
+        t["plaus"] = np.select([s.plaus_strength <= 0, s.plaus_strength < 0.1], ["p0", "p1"], "p2")
+        t["kind_plaus"] = t.kind + "|" + t.plaus
     keep = pick[1](t[pick[0]]).to_numpy() if pick else np.ones(len(t), bool)
     return t, keep
+
+
+def type_order(ts, ax):
+    """유형 순서: 그럴싸함은 구간 순서, 바꾼 종류 x 그럴싸함은 종류의 결정 수 순서 다음 구간 순서, 나머지는 결정 수 순서."""
+    vals = ts[ax].fillna("none")
+    n = vals.value_counts()
+    if ax == "plaus":
+        return [(b, n[b]) for b in PLAUS_BINS if b in n]
+    if ax == "kind_plaus":
+        kinds = ts.kind.value_counts().index.tolist()
+        return sorted(n.items(), key=lambda kv: (kinds.index(kv[0].split("|")[0]), list(PLAUS_BINS).index(kv[0].split("|")[1])))
+    return list(n.items())
 
 
 def model_rows(run, file):
@@ -124,9 +154,11 @@ def main():
         entry = {"id": sid, "file": file, "title": title, "feasible": feasible, "n": int(len(ts)),
                  "all": {m: cells(pd.concat(fs)) for m, fs in models.items()}, "axes": []}
         for ax in axes:
+            if ax not in ts:
+                continue
             vals = ts[ax].fillna("none")
             types = []
-            for v, n in vals.value_counts().items():
+            for v, n in type_order(ts, ax):
                 mask = (vals == v).to_numpy()
                 types.append({"id": v, "label": label(ax, v), "n": int(n),
                               "models": {m: cells(pd.concat([f[mask] for f in fs])) for m, fs in models.items()}})
