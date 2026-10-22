@@ -6,7 +6,7 @@
 
 대상
   T3 강도 기준 (Gemma 4 31B의 실행 불가능한 결정 중 category = strength, 206개)
-  T2 강도 기준 (규칙·확장·plausible CF⁻, 보이지 않는 원인 제외, 1,533개)
+  T2 강도 기준 (규칙 기반 메뉴 CF⁻, 보이지 않는 원인 제외, 1,533개)
   대조: T3 도로·다른 차 기준, T1의 faster / slower / stop (실행 가능)
 모델: B3, 이전 Ours, Ours (시드 0·1 평균). 지표: 안전율(NC·DAC·DDC 모두 통과), 거부율, 실패 종류, T1은 결정–경로 일치율
 
@@ -187,7 +187,7 @@ def main():
           "### ego 속도별", "", group_table(S3, "ego", safe + rej, egos), "",
           "### 앞뒤 행동 / 강도 방향별 (사람 결정 대비)", "", group_table(S3, "dir", safe + rej), "",
           "### 실패 종류 (앞차 상태별)", "", group_table(S3, "state", fails, states), "",
-          "## T2 강도 기준 (규칙·확장·plausible CF⁻, 1,533개): 같은 나눔", "",
+          "## T2 강도 기준 (규칙 기반 메뉴 CF⁻, 1,533개): 같은 나눔", "",
           group_table(T2, "state", safe + rej, states), "", group_table(T2, "dist", safe + rej, dists), "",
           group_table(T2, "dir", safe + rej), "",
           "## 대조: T1 faster / slower / stop (실행 가능): 결정–경로 일치율과 거부율", "",

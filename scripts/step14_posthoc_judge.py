@@ -270,7 +270,7 @@ def figure(F):
         f = fs[0]
         v, t3 = f["val"], f["T3"]
         panels = [("검증 세트 (CF⁺ / CF⁻)", v[v.sample_type == "cf_pos"].p, v[v.sample_type == "cf_neg"].p),
-                  ("테스트 T1 / T2 (규칙·확장·plausible CF)", f["T1"].p, f["T2"][f["T2"].visibility != "unseen"].p),
+                  ("테스트 T1 / T2 (규칙 기반 메뉴 CF)", f["T1"].p, f["T2"][f["T2"].visibility != "unseen"].p),
                   ("테스트 T3 (Gemma 4 31B 결정)", t3[t3.status == "feasible"].p, t3[t3.status == "infeasible"].p)]
         for j, (title, pos, neg) in enumerate(panels):
             ax = axes[i, j]
